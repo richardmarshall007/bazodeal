@@ -124,6 +124,26 @@ CREATE TABLE IF NOT EXISTS order_items (
   discount_pct NUMERIC(5,2)  NOT NULL
 );
 
+-- Count active deals for concurrency checks. SECURITY DEFINER avoids RLS recursion when
+-- called from the deals INSERT policy (a plain subquery on deals would re-enter policies).
+CREATE OR REPLACE FUNCTION public.merchant_active_deal_count(p_merchant_id uuid)
+RETURNS integer
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT count(*)::integer
+  FROM public.deals d
+  WHERE d.merchant_id = p_merchant_id
+    AND d.approved = true
+    AND (d.expires_at IS NULL OR d.expires_at >= current_date);
+$$;
+
+REVOKE ALL ON FUNCTION public.merchant_active_deal_count(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.merchant_active_deal_count(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.merchant_active_deal_count(uuid) TO service_role;
+
 -- ══════════════════════════════════════════════════════════════
 --  ROW LEVEL SECURITY (RLS)
 -- ══════════════════════════════════════════════════════════════
@@ -176,13 +196,7 @@ CREATE POLICY "Authenticated users can post deals"
             1
           ),
           1
-        ) > (
-          SELECT count(*)::int
-          FROM deals d
-          WHERE d.merchant_id = auth.uid()
-            AND d.approved = true
-            AND (d.expires_at IS NULL OR d.expires_at >= current_date)
-        )
+        ) > public.merchant_active_deal_count(auth.uid())
       )
     )
   );
