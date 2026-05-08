@@ -1,0 +1,357 @@
+-- ============================================================
+--  BAZODEAL — Supabase PostgreSQL Schema
+--  Run this in: Supabase Dashboard → SQL Editor → New query
+-- ============================================================
+
+-- ── Extensions ──────────────────────────────────────────────
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- ══════════════════════════════════════════════════════════════
+--  STORAGE BUCKETS
+-- ══════════════════════════════════════════════════════════════
+
+-- Create storage bucket for deal images
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'deal-images',
+  'deal-images',
+  true,
+  5242880, -- 5MB limit
+  ARRAY['image/jpeg', 'image/png', 'image/webp']
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Storage policies for deal-images bucket
+CREATE POLICY "Deal images are publicly accessible"
+  ON storage.objects FOR SELECT USING (bucket_id = 'deal-images');
+
+CREATE POLICY "Authenticated users can upload deal images"
+  ON storage.objects FOR INSERT WITH CHECK (
+    bucket_id = 'deal-images'
+    AND auth.role() = 'authenticated'
+  );
+
+CREATE POLICY "Users can update own deal images"
+  ON storage.objects FOR UPDATE USING (
+    bucket_id = 'deal-images'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+CREATE POLICY "Users can delete own deal images"
+  ON storage.objects FOR DELETE USING (
+    bucket_id = 'deal-images'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+-- ══════════════════════════════════════════════════════════════
+--  TABLES
+-- ══════════════════════════════════════════════════════════════
+
+-- Profiles (extends Supabase auth.users)
+CREATE TABLE IF NOT EXISTS profiles (
+  id          UUID        REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
+  name        TEXT        NOT NULL,
+  phone       TEXT,
+  dob_month   CHAR(2),
+  dob_year    CHAR(4),
+  gender      TEXT,
+  interests   TEXT[]      DEFAULT '{}',
+  role        TEXT        NOT NULL DEFAULT 'user'
+                          CHECK (role IN ('user', 'merchant', 'admin')),
+  concurrent_deals_limit INTEGER NOT NULL DEFAULT 1 CHECK (concurrent_deals_limit >= 1),
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Existing DBs: add the concurrency limit column if it doesn't exist yet.
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS concurrent_deals_limit INTEGER NOT NULL DEFAULT 1;
+
+-- Deals
+CREATE TABLE IF NOT EXISTS deals (
+  id            UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
+  title         TEXT        NOT NULL,
+  merchant_id   UUID        REFERENCES profiles(id) ON DELETE CASCADE,
+  merchant_name TEXT        NOT NULL,
+  category      TEXT        NOT NULL DEFAULT 'Electronics',
+  emoji         TEXT        DEFAULT '🛍️',
+  retail_price  NUMERIC(12,2) NOT NULL CHECK (retail_price > 0),
+  discount_pct  NUMERIC(5,2)  NOT NULL CHECK (discount_pct > 0 AND discount_pct < 100),
+  description   TEXT,
+  stock         INTEGER     DEFAULT 99  CHECK (stock >= 0),
+  expires_at    DATE,
+  approved      BOOLEAN     DEFAULT FALSE,
+  like_count    INTEGER     DEFAULT 0,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Likes (many-to-many users ↔ deals)
+CREATE TABLE IF NOT EXISTS likes (
+  user_id    UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  deal_id    UUID REFERENCES deals(id)   ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, deal_id)
+);
+
+-- Cart items
+CREATE TABLE IF NOT EXISTS cart_items (
+  id       UUID    DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id  UUID    REFERENCES profiles(id) ON DELETE CASCADE,
+  deal_id  UUID    REFERENCES deals(id)   ON DELETE CASCADE,
+  qty      INTEGER DEFAULT 1 CHECK (qty > 0),
+  added_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (user_id, deal_id)
+);
+
+-- Orders
+CREATE TABLE IF NOT EXISTS orders (
+  id         UUID    DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id    UUID    REFERENCES profiles(id) ON DELETE SET NULL,
+  total      NUMERIC(12,2) NOT NULL,
+  status     TEXT    DEFAULT 'pending'
+                     CHECK (status IN ('pending','processing','shipped','delivered','cancelled')),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Order line items (snapshot prices at time of purchase)
+CREATE TABLE IF NOT EXISTS order_items (
+  id           UUID    DEFAULT uuid_generate_v4() PRIMARY KEY,
+  order_id     UUID    REFERENCES orders(id) ON DELETE CASCADE,
+  deal_id      UUID    REFERENCES deals(id)  ON DELETE SET NULL,
+  deal_title   TEXT    NOT NULL,
+  qty          INTEGER NOT NULL CHECK (qty > 0),
+  unit_price   NUMERIC(12,2) NOT NULL,
+  retail_price NUMERIC(12,2) NOT NULL,
+  discount_pct NUMERIC(5,2)  NOT NULL
+);
+
+-- ══════════════════════════════════════════════════════════════
+--  ROW LEVEL SECURITY (RLS)
+-- ══════════════════════════════════════════════════════════════
+
+ALTER TABLE profiles   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE deals      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE likes      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cart_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
+
+-- ── Profiles ────────────────────────────────────────────────
+CREATE POLICY "Anyone can read profiles"
+  ON profiles FOR SELECT USING (true);
+
+CREATE POLICY "Users can insert own profile"
+  ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
+CREATE POLICY "Users can update own profile"
+  ON profiles FOR UPDATE USING (auth.uid() = id);
+
+-- ── Deals ───────────────────────────────────────────────────
+-- Approved deals: visible to everyone
+-- Unapproved: only visible to the posting merchant or admins
+CREATE POLICY "Deals are selectable based on role"
+  ON deals FOR SELECT USING (
+    approved = true
+    OR auth.uid() = merchant_id
+    OR EXISTS (
+      SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'
+    )
+  );
+
+CREATE POLICY "Authenticated users can post deals"
+  ON deals FOR INSERT WITH CHECK (
+    auth.uid() = merchant_id
+    AND (
+      -- Admins can always post.
+      EXISTS (
+        SELECT 1 FROM profiles p
+        WHERE p.id = auth.uid()
+          AND p.role = 'admin'
+      )
+      OR
+      -- Non-admins: active deals (approved + not expired) must be below the user's limit.
+      (
+        GREATEST(
+          COALESCE(
+            (SELECT p.concurrent_deals_limit FROM profiles p WHERE p.id = auth.uid()),
+            1
+          ),
+          1
+        ) > (
+          SELECT count(*)::int
+          FROM deals d
+          WHERE d.merchant_id = auth.uid()
+            AND d.approved = true
+            AND (d.expires_at IS NULL OR d.expires_at >= current_date)
+        )
+      )
+    )
+  );
+
+CREATE POLICY "Merchants update own deals; admins update all"
+  ON deals FOR UPDATE USING (
+    auth.uid() = merchant_id
+    OR EXISTS (
+      SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'
+    )
+  );
+
+CREATE POLICY "Admins can delete deals"
+  ON deals FOR DELETE USING (
+    EXISTS (
+      SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'
+    )
+  );
+
+-- ── Likes ───────────────────────────────────────────────────
+CREATE POLICY "Likes are public"
+  ON likes FOR SELECT USING (true);
+
+CREATE POLICY "Users manage own likes"
+  ON likes FOR ALL USING (auth.uid() = user_id);
+
+-- ── Cart items ──────────────────────────────────────────────
+CREATE POLICY "Users manage own cart"
+  ON cart_items FOR ALL USING (auth.uid() = user_id);
+
+-- ── Orders ──────────────────────────────────────────────────
+CREATE POLICY "Users see own orders"
+  ON orders FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users place own orders"
+  ON orders FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Admins see all orders"
+  ON orders FOR SELECT USING (
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+  );
+
+-- ── Order items ─────────────────────────────────────────────
+CREATE POLICY "Users see own order items"
+  ON order_items FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM orders
+      WHERE orders.id = order_items.order_id
+        AND orders.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Users insert own order items"
+  ON order_items FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM orders
+      WHERE orders.id = order_items.order_id
+        AND orders.user_id = auth.uid()
+    )
+  );
+
+-- ══════════════════════════════════════════════════════════════
+--  FUNCTIONS & TRIGGERS
+-- ══════════════════════════════════════════════════════════════
+
+-- Auto-update like_count on deals when a like is added/removed
+CREATE OR REPLACE FUNCTION update_like_count()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    UPDATE deals SET like_count = like_count + 1 WHERE id = NEW.deal_id;
+  ELSIF TG_OP = 'DELETE' THEN
+    UPDATE deals SET like_count = GREATEST(like_count - 1, 0) WHERE id = OLD.deal_id;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_like_change ON likes;
+CREATE TRIGGER on_like_change
+  AFTER INSERT OR DELETE ON likes
+  FOR EACH ROW EXECUTE FUNCTION update_like_count();
+
+-- Auto-create profile row when a new user signs up via Supabase Auth
+CREATE OR REPLACE FUNCTION handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO profiles (id, name, role, concurrent_deals_limit)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
+    'user',
+    1
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
+-- ══════════════════════════════════════════════════════════════
+--  SEED DATA — Sample deals (optional, run separately)
+--  First create your admin user via Supabase Auth,
+--  then get their UUID from auth.users and paste below.
+-- ══════════════════════════════════════════════════════════════
+
+-- Step 1: Set your admin user's role (replace <YOUR_ADMIN_UUID>)
+-- UPDATE profiles SET role = 'admin' WHERE id = '<YOUR_ADMIN_UUID>';
+
+-- Step 2: Seed sample deals (replace <YOUR_ADMIN_UUID>)
+/*
+INSERT INTO deals (title, merchant_id, merchant_name, category, emoji, retail_price, discount_pct, description, stock, expires_at, approved) VALUES
+  ('Apple AirPods Pro (2nd Gen)', '<YOUR_ADMIN_UUID>', 'TechZone TT', 'Electronics', '🎧', 2499.00, 38, 'Active noise cancellation, Adaptive Transparency, and Personalized Spatial Audio.', 8,  '2026-05-30', true),
+  ('Nike Air Max 270',            '<YOUR_ADMIN_UUID>', 'SneakerHub',  'Fashion',     '👟', 899.00,  50, 'Iconic Air Max cushioning meets bold street style. Lightweight mesh upper.',       22, '2026-06-05', true),
+  ('Dyson V15 Detect Vacuum',     '<YOUR_ADMIN_UUID>', 'HomeGadgets', 'Home & Garden','🌀', 3299.00, 42, 'Laser reveals microscopic dust. Piezo sensor counts particles in real-time.',    5,  '2026-05-20', true),
+  ('Samsung 65" QLED 4K TV',      '<YOUR_ADMIN_UUID>', 'ElectroMart', 'Electronics', '📺', 7999.00, 35, 'Quantum Dot tech, 120Hz refresh, Dolby Atmos sound.',                            3,  '2026-05-25', true),
+  ('Instant Pot Duo 7-in-1',      '<YOUR_ADMIN_UUID>', 'KitchenPro',  'Home & Garden','🍲', 699.00,  55, 'Pressure cooker, slow cooker, rice cooker, steamer, sauté pan and more.',       30, '2026-06-15', true),
+  ('Levi''s 501 Original Jeans',  '<YOUR_ADMIN_UUID>', 'DenimWorld',  'Fashion',     '👖', 450.00,  40, 'The original straight-leg jean and timeless American style since 1873.',         45, '2026-07-01', true),
+  ('Garmin Forerunner 265',        '<YOUR_ADMIN_UUID>', 'SportsTT',    'Sports',      '⌚', 2299.00, 30, 'AMOLED display, training readiness score, HRV status, performance metrics.',     12, '2026-06-10', true),
+  ('L''Oreal Revitalift 1.5% HA', '<YOUR_ADMIN_UUID>', 'BeautyBar',   'Beauty',      '✨', 320.00,  60, 'Concentrated pure hyaluronic acid visibly plumps skin in just 1 week.',          60, '2026-06-20', true);
+*/
+
+-- ══════════════════════════════════════════════════════════════
+--  USEFUL VIEWS (optional helpers)
+-- ══════════════════════════════════════════════════════════════
+
+DROP VIEW IF EXISTS profiles_with_email CASCADE;
+CREATE VIEW profiles_with_email AS
+SELECT
+  p.id,
+  p.name,
+  p.phone,
+  p.dob_month,
+  p.dob_year,
+  p.gender,
+  p.interests,
+  p.role,
+  p.created_at,
+  au.email
+FROM profiles p
+JOIN auth.users au ON au.id = p.id;
+
+DROP VIEW IF EXISTS deals_with_savings CASCADE;
+CREATE VIEW deals_with_savings AS
+SELECT
+  *,
+  ROUND(retail_price * (1 - discount_pct / 100), 2) AS final_price,
+  ROUND(retail_price * discount_pct / 100, 2)        AS savings
+FROM deals;
+
+DROP VIEW IF EXISTS order_summary CASCADE;
+CREATE VIEW order_summary AS
+SELECT
+  o.id,
+  o.created_at,
+  o.total,
+  o.status,
+  p.name AS customer_name,
+  COUNT(oi.id) AS item_count
+FROM orders o
+JOIN profiles p ON p.id = o.user_id
+LEFT JOIN order_items oi ON oi.order_id = o.id
+GROUP BY o.id, p.name;
+
+-- Grant select on views to authenticated users
+GRANT SELECT ON profiles_with_email TO authenticated;
+GRANT SELECT ON deals_with_savings TO authenticated;
+GRANT SELECT ON order_summary TO authenticated;
