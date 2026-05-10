@@ -14,6 +14,59 @@ const GENDERS    = ["Male","Female","Non-binary","Prefer not to say"];
 const EMOJIS     = ["🛍️","📱","👗","🏠","⚽","💄","✈️","🍕","🧸","📚","🚗","💊","💍","🏕️","🎮","🐾","🎵","🍫","🏋️","🖥️"];
 const TODAY      = new Date().toISOString().split("T")[0];
 
+/** ISO 3166-1 alpha-2 `gl` for Google regional results (Discount Finder) */
+const FINDER_COUNTRIES = [
+  { gl: "tt", name: "Trinidad & Tobago" },
+  { gl: "ag", name: "Antigua and Barbuda" },
+  { gl: "bb", name: "Barbados" },
+  { gl: "jm", name: "Jamaica" },
+  { gl: "gy", name: "Guyana" },
+  { gl: "us", name: "United States" },
+  { gl: "ca", name: "Canada" },
+  { gl: "gb", name: "United Kingdom" },
+  { gl: "ie", name: "Ireland" },
+  { gl: "de", name: "Germany" },
+  { gl: "fr", name: "France" },
+  { gl: "es", name: "Spain" },
+  { gl: "it", name: "Italy" },
+  { gl: "nl", name: "Netherlands" },
+  { gl: "be", name: "Belgium" },
+  { gl: "se", name: "Sweden" },
+  { gl: "no", name: "Norway" },
+  { gl: "dk", name: "Denmark" },
+  { gl: "fi", name: "Finland" },
+  { gl: "pl", name: "Poland" },
+  { gl: "pt", name: "Portugal" },
+  { gl: "at", name: "Austria" },
+  { gl: "ch", name: "Switzerland" },
+  { gl: "au", name: "Australia" },
+  { gl: "nz", name: "New Zealand" },
+  { gl: "in", name: "India" },
+  { gl: "sg", name: "Singapore" },
+  { gl: "my", name: "Malaysia" },
+  { gl: "ph", name: "Philippines" },
+  { gl: "jp", name: "Japan" },
+  { gl: "kr", name: "South Korea" },
+  { gl: "br", name: "Brazil" },
+  { gl: "mx", name: "Mexico" },
+  { gl: "za", name: "South Africa" },
+  { gl: "ng", name: "Nigeria" },
+  { gl: "ke", name: "Kenya" },
+  { gl: "ae", name: "United Arab Emirates" },
+].sort((a, b) => (a.gl === "tt" ? -1 : b.gl === "tt" ? 1 : a.name.localeCompare(b.name)));
+
+const googleShoppingUrl = (query, gl) => {
+  const q = (query || "deals discounts").trim();
+  const params = new URLSearchParams({ tbm: "shop", q, gl, hl: "en" });
+  return `https://www.google.com/search?${params.toString()}`;
+};
+const googleDealsWebUrl = (query, gl) => {
+  const base = (query || "").trim();
+  const q = base ? `${base} discount OR sale OR deals` : "best deals discounts sale";
+  const params = new URLSearchParams({ q, gl, hl: "en" });
+  return `https://www.google.com/search?${params.toString()}`;
+};
+
 const finalPrice = d => +(+d.retail_price * (1 - +d.discount_pct / 100)).toFixed(2);
 const savings    = d => +(+d.retail_price - finalPrice(d)).toFixed(2);
 const fmt        = n => `TT$${Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
@@ -321,6 +374,10 @@ textarea.inp{resize:vertical;line-height:1.5}
 .empty h3{font-family:'Bebas Neue';font-size:36px;letter-spacing:2px;color:var(--text);margin-bottom:8px}
 .empty p{font-size:14px;max-width:280px;margin:0 auto 24px}
 
+.finder-hint{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:20px;max-width:560px}
+.finder-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.finder-note{font-size:11px;color:var(--text3);margin-top:20px;line-height:1.5;max-width:520px}
+
 .dash{padding:36px 24px 60px;max-width:960px;margin:0 auto}
 .dash-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:28px;flex-wrap:wrap;gap:12px}
 .dash-head h1{font-family:'Bebas Neue';font-size:48px;letter-spacing:3px}
@@ -525,11 +582,14 @@ export default function Bazodeal() {
   const [cart, setCart]               = useState([]);
   const [liked, setLiked]             = useState(new Set());
   const [filterCat, setFilterCat]     = useState("All");
+  const [finderGl, setFinderGl]       = useState("tt");
+  const [finderQ, setFinderQ]         = useState("");
   const [dropdown, setDropdown]       = useState(false);
   const [notif, setNotif]             = useState(null);
   const [formErr, setFormErr]         = useState("");
   const [loading, setLoading]         = useState(true);
   const [posting, setPosting]         = useState(false);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [adminActionId, setAdminActionId] = useState(null);
   const [imageFile, setImageFile]     = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
@@ -710,6 +770,28 @@ export default function Bazodeal() {
 
     return () => { subscription.unsubscribe(); };
   }, [fetchDeals, fetchProfile, fetchCart, fetchLikes, fetchAllUsers, ensureProfile]);
+
+  // Stripe return URLs: ?checkout=success | ?checkout=cancel
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const c = params.get("checkout");
+    if (!c) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("checkout");
+    window.history.replaceState({}, "", url.pathname + (url.search || ""));
+    const t = window.setTimeout(() => {
+      if (c === "success") {
+        pop("Payment received! Your order is confirmed.");
+        void supabase.auth.getSession().then(({ data: { session } }) => {
+          if (session?.user) void fetchCart(session.user.id);
+        });
+        void fetchDeals();
+      } else if (c === "cancel") {
+        pop("Checkout was cancelled.", "error");
+      }
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [fetchCart, fetchDeals]);
 
   // ── Image Handling ───────────────────────────────────────
   const handleImageChange = (e) => {
@@ -945,8 +1027,51 @@ export default function Bazodeal() {
     }
   };
 
+  const stripeCheckoutEnabled = import.meta.env.VITE_USE_STRIPE_CHECKOUT === "true";
+
   const checkout = async () => {
+    if (!currentUser) {
+      setAuth("login");
+      return;
+    }
     const cartTotal = cart.reduce((s, i) => s + finalPrice(i.deal) * i.qty, 0);
+    if (cartTotal <= 0) {
+      pop("Cart total is zero.", "error");
+      return;
+    }
+
+    if (stripeCheckoutEnabled) {
+      setCheckoutBusy(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          pop("Please sign in again to pay.", "error");
+          return;
+        }
+        const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        if (error) {
+          pop(error.message || "Could not start checkout. Deploy Edge Functions and set Stripe secrets.", "error");
+          return;
+        }
+        if (data?.error) {
+          pop(typeof data.error === "string" ? data.error : "Could not start checkout.", "error");
+          return;
+        }
+        if (data?.url) {
+          window.location.href = data.url;
+          return;
+        }
+        pop("Could not start checkout.", "error");
+      } catch (e) {
+        pop(e?.message || "Could not start checkout.", "error");
+      } finally {
+        setCheckoutBusy(false);
+      }
+      return;
+    }
+
     const { data: order, error: oErr } = await supabase
       .from("orders").insert({ user_id: currentUser.id, total: cartTotal }).select().single();
     if (oErr) { pop("Checkout failed. Try again.", "error"); return; }
@@ -1077,6 +1202,17 @@ export default function Bazodeal() {
               Page
             </a>
           </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={e => {
+              e.stopPropagation();
+              setView("finder");
+            }}
+            title="Search the web for deals in a chosen country"
+          >
+            🔍 Finder
+          </button>
           {currentUser && profile ? (
             <>
               {profile.role === "admin" && (
@@ -1279,6 +1415,58 @@ export default function Bazodeal() {
         </>
       )}
 
+      {/* ══ DISCOUNT FINDER (regional web search) ══ */}
+      {view === "finder" && (
+        <div className="page">
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12, marginBottom:8 }}>
+            <h1 className="page-title" style={{ margin:0 }}>🔍 Discount Finder</h1>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setView("home")}>← Back to deals</button>
+          </div>
+          <p className="finder-hint">
+            Pick a country so search engines bias results to that region (shipping, local retailers, and currency context).
+            Bazodeal listings stay on Home; this opens Google in a new tab for broader online deals.
+          </p>
+          <div className="fg">
+            <label>Country / region</label>
+            <select className="inp" value={finderGl} onChange={e => setFinderGl(e.target.value)}>
+              {FINDER_COUNTRIES.map(c => (
+                <option key={c.gl} value={c.gl}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="fg">
+            <label>What are you looking for? (optional)</label>
+            <input
+              className="inp"
+              placeholder="e.g. wireless earbuds, kitchen blender, kids toys"
+              value={finderQ}
+              onChange={e => setFinderQ(e.target.value)}
+            />
+          </div>
+          <div className="finder-actions">
+            <a
+              className="btn btn-pri btn-sm"
+              href={googleShoppingUrl(finderQ, finderGl)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Google Shopping
+            </a>
+            <a
+              className="btn btn-gold btn-sm"
+              href={googleDealsWebUrl(finderQ, finderGl)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Web: deals & sales
+            </a>
+          </div>
+          <p className="finder-note">
+            Results depend on Google and merchants in that country. Always verify the seller, return policy, and whether they ship to your address.
+          </p>
+        </div>
+      )}
+
       {/* ══ CART ══ */}
       {view === "cart" && (
         <div className="page">
@@ -1330,8 +1518,18 @@ export default function Bazodeal() {
                 </div>
                 <div className="sum-total"><span>Order Total</span><span>{fmt(cartTotal)}</span></div>
               </div>
-              <button className="btn btn-pri btn-lg btn-full" style={{ marginTop:14 }} onClick={checkout}>
-                Checkout — {fmt(cartTotal)}
+              {stripeCheckoutEnabled && (
+                <p style={{ marginTop:12, fontSize:12, color:"var(--text3)", lineHeight:1.5 }}>
+                  Secure card payment via Stripe. Your order is created after payment succeeds.
+                </p>
+              )}
+              <button
+                className="btn btn-pri btn-lg btn-full"
+                style={{ marginTop:14 }}
+                disabled={checkoutBusy}
+                onClick={checkout}
+              >
+                {checkoutBusy ? <><span className="spin">⏳</span> Redirecting…</> : stripeCheckoutEnabled ? `Pay ${fmt(cartTotal)}` : `Checkout — ${fmt(cartTotal)}`}
               </button>
             </>
           )}

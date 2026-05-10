@@ -176,6 +176,61 @@ Add your `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as environment variabl
 
 ---
 
+## Paid checkout with Stripe (optional)
+
+Bazodeal can take card payments through **Stripe Checkout** so money is collected before an order is written to the database. The browser never sees your Stripe secret key: a Supabase **Edge Function** builds the session from the signed-in user’s cart (same prices as the app), and a **webhook** creates `orders` / `order_items`, clears the cart, and lowers `deals.stock` after Stripe confirms payment.
+
+### 1. Database
+
+Run the `ALTER TABLE orders …` block in `bazodeal_schema.sql` (or run `src/bazodeal_schema.sql` on a fresh project). Existing projects need the new column:
+
+- `orders.stripe_checkout_session_id` (nullable, unique when set)
+
+### 2. Stripe
+
+1. Create a [Stripe](https://stripe.com) account and get your **Secret key** (test mode is fine to start).
+2. In **Developers → Webhooks → Add endpoint**, point to:
+
+   `https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/stripe-webhook`
+
+   Select the event **`checkout.session.completed`**, then copy the **Signing secret** (`whsec_…`).
+
+3. In Stripe **Settings → Business settings**, confirm your account can charge in your chosen currency (default below is **TTD**; override with `STRIPE_CURRENCY` if needed).
+
+### 3. Supabase Edge Functions
+
+Install the [Supabase CLI](https://supabase.com/docs/guides/cli), link the project, then deploy:
+
+```bash
+supabase functions deploy create-checkout-session
+supabase functions deploy stripe-webhook
+```
+
+In **Project Settings → Edge Functions → Secrets** (or via CLI), set:
+
+| Secret | Purpose |
+|--------|---------|
+| `STRIPE_SECRET_KEY` | Stripe API secret (`sk_test_…` or `sk_live_…`) |
+| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret (`whsec_…`) |
+| `PUBLIC_SITE_URL` | Your deployed site origin with **no** trailing slash (e.g. `https://bazodeal.vercel.app`) — used for Stripe success/cancel redirects |
+| `STRIPE_CURRENCY` | Optional; default `ttd` |
+
+`SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_URL` are usually injected automatically for Edge Functions.
+
+The repo includes `supabase/config.toml` with **`verify_jwt = false`** for `stripe-webhook` so Stripe can call it without a Supabase JWT.
+
+### 4. Frontend
+
+In `.env`:
+
+```bash
+VITE_USE_STRIPE_CHECKOUT=true
+```
+
+Rebuild or restart `npm run dev`. The cart **Pay** button calls `create-checkout-session` and redirects to Stripe. With this unset or `false`, checkout keeps the previous behaviour (order created immediately without payment — useful only for demos).
+
+---
+
 ## Security Checklist Before Going Live
 
 - [ ] Enable email confirmation in Supabase Auth settings

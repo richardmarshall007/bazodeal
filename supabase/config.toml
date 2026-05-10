@@ -1,0 +1,5 @@
+# Supabase CLI — https://supabase.com/docs/guides/cli
+# Stripe cannot send a Supabase JWT; disable JWT verification for this function only.
+
+[functions.stripe-webhook]
+verify_jwt = false

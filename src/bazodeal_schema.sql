@@ -124,6 +124,12 @@ CREATE TABLE IF NOT EXISTS order_items (
   discount_pct NUMERIC(5,2)  NOT NULL
 );
 
+-- Stripe Checkout (optional): idempotent webhook handling
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS stripe_checkout_session_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS orders_stripe_checkout_session_id_key
+  ON orders (stripe_checkout_session_id)
+  WHERE stripe_checkout_session_id IS NOT NULL;
+
 -- Count active deals for concurrency checks. SECURITY DEFINER avoids RLS recursion when
 -- called from the deals INSERT policy (a plain subquery on deals would re-enter policies).
 CREATE OR REPLACE FUNCTION public.merchant_active_deal_count(p_merchant_id uuid)
