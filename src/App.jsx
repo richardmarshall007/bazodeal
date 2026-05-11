@@ -94,7 +94,8 @@ const withTimeout = (promise, ms, timeoutMessage) =>
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(timeoutMessage)), ms)),
   ]);
-const cropImageFile = async (file, zoom, focusX, focusY) => {
+/** Fit entire image inside a fixed frame (letterbox / pillarbox), pad with app background — no cropping. */
+const fitPadImageFile = async (file) => {
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
@@ -109,32 +110,29 @@ const cropImageFile = async (file, zoom, focusX, focusY) => {
     image.src = dataUrl;
   });
 
-  // Export to a fixed landscape frame for consistent card rendering.
-  // Scaling preserves aspect ratio; only centered crop is applied (no skew/stretch).
   const targetW = 1200;
   const targetH = 800;
+  const padRgb = "#0F0E13";
+
   const canvas = document.createElement("canvas");
   canvas.width = targetW;
   canvas.height = targetH;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not initialize image editor.");
 
-  const baseScale = Math.max(targetW / img.width, targetH / img.height);
-  const finalScale = baseScale * zoom;
-  const drawW = img.width * finalScale;
-  const drawH = img.height * finalScale;
-  const maxX = Math.max(0, drawW - targetW);
-  const maxY = Math.max(0, drawH - targetH);
-  const x = -(maxX * (focusX / 100));
-  const y = -(maxY * (focusY / 100));
+  const scale = Math.min(targetW / img.width, targetH / img.height);
+  const drawW = img.width * scale;
+  const drawH = img.height * scale;
+  const x = (targetW - drawW) / 2;
+  const y = (targetH - drawH) / 2;
 
+  ctx.fillStyle = padRgb;
+  ctx.fillRect(0, 0, targetW, targetH);
   ctx.drawImage(img, x, y, drawW, drawH);
 
   const toBlob = (type, quality) =>
     new Promise((resolve) => canvas.toBlob(resolve, type, quality));
 
-  // Compress for fast loading on the home feed.
-  // Prefer WebP when available and target a reasonable size budget.
   const targetMaxBytes = 400 * 1024;
   const mimeType = "image/webp";
   let quality = 0.85;
@@ -148,11 +146,11 @@ const cropImageFile = async (file, zoom, focusX, focusY) => {
   if (!blob) {
     blob = await toBlob("image/jpeg", 0.8);
   }
-  if (!blob) throw new Error("Could not process image crop.");
+  if (!blob) throw new Error("Could not process image.");
 
   const safeName = (file.name || "deal-image").replace(/\.[^/.]+$/, "");
   const extension = blob.type === "image/webp" ? "webp" : "jpg";
-  return new File([blob], `${safeName}-cropped.${extension}`, { type: blob.type });
+  return new File([blob], `${safeName}-deal.${extension}`, { type: blob.type });
 };
 
 // ── CSS ──────────────────────────────────────────────────────
@@ -265,7 +263,7 @@ body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden}
 .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column;transition:all .22s}
 .card:hover{border-color:rgba(255,208,0,.35);transform:translateY(-3px);box-shadow:0 12px 40px rgba(0,0,0,.5),0 0 0 1px rgba(255,61,0,.15),0 0 28px rgba(255,145,0,.08)}
 .card-img{height:160px;display:flex;align-items:center;justify-content:center;font-size:68px;background:var(--bg3);position:relative;overflow:hidden}
-.card-img img{width:100%;height:100%;object-fit:cover;display:block}
+.card-img img{width:100%;height:100%;object-fit:contain;object-position:center;display:block}
 .card-img .emoji-fallback{font-size:68px}
 .disc-badge{position:absolute;top:10px;right:10px;background:linear-gradient(145deg,var(--flame-yellow),var(--flame-orange));color:#08070A;font-family:'Bebas Neue';font-size:26px;letter-spacing:1px;padding:3px 10px 1px;border-radius:8px;line-height:1.1;text-align:center;z-index:1;box-shadow:0 4px 14px rgba(255,61,0,.35)}
 .disc-badge small{display:block;font-family:'Nunito Sans';font-size:9px;font-weight:800;letter-spacing:1px;margin-top:-2px;opacity:.9}
@@ -305,8 +303,8 @@ textarea.inp{resize:vertical;line-height:1.5}
 
 .img-upload-area{border:2px dashed var(--border2);border-radius:var(--radius-lg);padding:20px;text-align:center;cursor:pointer;transition:all .2s;position:relative;overflow:hidden;min-height:120px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px}
 .img-upload-area:hover{border-color:var(--primary);background:var(--pri-dim)}
-.img-upload-area.has-image{padding:0;border-style:solid}
-.img-upload-area img{width:100%;height:160px;object-fit:cover;border-radius:calc(var(--radius-lg) - 2px);display:block}
+.img-upload-area.has-image{padding:0;border-style:solid;background:var(--bg3)}
+.img-upload-area img{width:100%;height:160px;object-fit:contain;object-position:center;border-radius:calc(var(--radius-lg) - 2px);display:block}
 .img-upload-label{font-size:12px;color:var(--text2);font-weight:700}
 .img-upload-hint{font-size:11px;color:var(--text3)}
 .img-change-btn{position:absolute;bottom:8px;right:8px;background:rgba(8,7,10,.85);border:1px solid var(--border2);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;color:var(--text2);cursor:pointer;font-family:'Nunito Sans';z-index:2}
@@ -329,7 +327,7 @@ textarea.inp{resize:vertical;line-height:1.5}
 .cart-item{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;display:flex;align-items:center;gap:14px;margin-bottom:10px;transition:border .2s}
 .cart-item:hover{border-color:var(--border2)}
 .cart-emo{font-size:38px;min-width:48px;width:48px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:var(--bg3);overflow:hidden;flex-shrink:0}
-.cart-emo img{width:100%;height:100%;object-fit:cover}
+.cart-emo img{width:100%;height:100%;object-fit:contain;object-position:center}
 .cart-info{flex:1;min-width:0}
 .cart-info h3{font-size:14px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cart-info p{font-size:12px;color:var(--text2);margin-top:2px}
@@ -387,7 +385,7 @@ textarea.inp{resize:vertical;line-height:1.5}
 .admin-row{padding:14px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);transition:background .15s}
 .admin-row:last-child{border-bottom:none}.admin-row:hover{background:var(--bg3)}
 .admin-emo{font-size:24px;min-width:40px;width:40px;height:40px;border-radius:8px;background:var(--bg3);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0}
-.admin-emo img{width:100%;height:100%;object-fit:cover}
+.admin-emo img{width:100%;height:100%;object-fit:contain;object-position:center}
 .admin-info{flex:1;min-width:0}
 .admin-info h4{font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .admin-info p{font-size:11px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -423,7 +421,6 @@ textarea.inp{resize:vertical;line-height:1.5}
 // ── DealForm — outside main component to prevent cursor-jump remounts ────────
 function DealForm({
   dealF, setDealF, imagePreview, onImageChange, posting, onPost, title, btnLabel, btnClass,
-  cropZoom, setCropZoom, cropX, setCropX, cropY, setCropY,
 }) {
   const showPreview = dealF.retailPrice && dealF.discountPct && +dealF.retailPrice > 0 && +dealF.discountPct > 0;
 
@@ -436,14 +433,7 @@ function DealForm({
         <div className={`img-upload-area ${imagePreview ? "has-image" : ""}`}>
           {imagePreview ? (
             <>
-              <img
-                src={imagePreview}
-                alt="Preview"
-                style={{
-                  transform: `scale(${cropZoom})`,
-                  transformOrigin: `${cropX}% ${cropY}%`,
-                }}
-              />
+              <img src={imagePreview} alt="Preview" />
               <button
                 className="img-change-btn"
                 onClick={e => { e.stopPropagation(); document.getElementById("deal-img-input").click(); }}
@@ -467,29 +457,9 @@ function DealForm({
       </div>
 
       {imagePreview && (
-        <div className="fg" style={{ marginTop:-4 }}>
-          <label>Image Crop</label>
-          <div style={{ display:"grid", gap:8 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"86px 1fr 44px", gap:8, alignItems:"center" }}>
-              <span style={{ fontSize:12, color:"var(--text2)" }}>Zoom</span>
-              <input className="inp" type="range" min="1" max="2.5" step="0.05" value={cropZoom}
-                onChange={e => setCropZoom(Number(e.target.value))} />
-              <span style={{ fontSize:12, color:"var(--text2)", textAlign:"right" }}>{cropZoom.toFixed(2)}x</span>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"86px 1fr 44px", gap:8, alignItems:"center" }}>
-              <span style={{ fontSize:12, color:"var(--text2)" }}>Left/Right</span>
-              <input className="inp" type="range" min="0" max="100" step="1" value={cropX}
-                onChange={e => setCropX(Number(e.target.value))} />
-              <span style={{ fontSize:12, color:"var(--text2)", textAlign:"right" }}>{cropX}%</span>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"86px 1fr 44px", gap:8, alignItems:"center" }}>
-              <span style={{ fontSize:12, color:"var(--text2)" }}>Up/Down</span>
-              <input className="inp" type="range" min="0" max="100" step="1" value={cropY}
-                onChange={e => setCropY(Number(e.target.value))} />
-              <span style={{ fontSize:12, color:"var(--text2)", textAlign:"right" }}>{cropY}%</span>
-            </div>
-          </div>
-        </div>
+        <p style={{ fontSize:11, color:"var(--text3)", marginTop:-6, marginBottom:4 }}>
+          Full image is kept (landscape or portrait); sides or top/bottom may show padding on the card.
+        </p>
       )}
 
       <div className="row2">
@@ -599,9 +569,6 @@ export default function Bazodeal() {
   const [adminActionId, setAdminActionId] = useState(null);
   const [imageFile, setImageFile]     = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
-  const [cropZoom, setCropZoom] = useState(1);
-  const [cropX, setCropX] = useState(50);
-  const [cropY, setCropY] = useState(50);
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroCarouselPaused, setHeroCarouselPaused] = useState(false);
   const [radioStreamPlaying, setRadioStreamPlaying] = useState(false);
@@ -638,9 +605,6 @@ export default function Bazodeal() {
     setDealF({ title:"", category:"Electronics", retailPrice:"", discountPct:"", emoji:"🛍️", description:"", stock:"", expires:"" });
     setImageFile(null);
     setImagePreview(null);
-    setCropZoom(1);
-    setCropX(50);
-    setCropY(50);
   };
 
   // ── Data Fetchers ────────────────────────────────────────
@@ -836,18 +800,15 @@ export default function Bazodeal() {
     if (file.size > 5 * 1024 * 1024) { pop("Image must be under 5MB", "error"); return; }
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
-    setCropZoom(1);
-    setCropX(50);
-    setCropY(50);
   };
 
   const uploadImage = async () => {
     if (!imageFile || !currentUser) return null;
     let processedImageFile;
     try {
-      processedImageFile = await cropImageFile(imageFile, cropZoom, cropX, cropY);
+      processedImageFile = await fitPadImageFile(imageFile);
     } catch (err) {
-      pop(err.message || "Could not crop image.", "error");
+      pop(err.message || "Could not process image.", "error");
       return null;
     }
     const ext      = processedImageFile.name.split(".").pop();
@@ -1926,9 +1887,17 @@ export default function Bazodeal() {
             <h1>🏪 {profile.role === "admin" ? "Deals Dashboard" : "Post a Deal"}</h1>
             <button className="btn btn-ghost btn-sm" onClick={() => setView("home")}>← Back</button>
           </div>
-          <DealForm dealF={dealF} setDealF={setDealF} imagePreview={imagePreview} onImageChange={handleImageChange}
-            posting={posting} onPost={postDeal} title="New Deal Details" btnLabel="Submit Deal 🔥" btnClass="btn-pri"
-            cropZoom={cropZoom} setCropZoom={setCropZoom} cropX={cropX} setCropX={setCropX} cropY={cropY} setCropY={setCropY} />
+          <DealForm
+            dealF={dealF}
+            setDealF={setDealF}
+            imagePreview={imagePreview}
+            onImageChange={handleImageChange}
+            posting={posting}
+            onPost={postDeal}
+            title="New Deal Details"
+            btnLabel="Submit Deal 🔥"
+            btnClass="btn-pri"
+          />
           <h3 className="admin-list-title">My Submitted Deals</h3>
           <div className="admin-list">
             {deals.filter(d => d.merchant_id === currentUser.id).length === 0 ? (
@@ -1961,9 +1930,17 @@ export default function Bazodeal() {
             <div className="stat-card"><div className="stat-card-n">{allUsers.length}</div><div className="stat-card-l">Members</div></div>
           </div>
 
-          <DealForm dealF={dealF} setDealF={setDealF} imagePreview={imagePreview} onImageChange={handleImageChange}
-            posting={posting} onPost={postDeal} title="Upload Deal" btnLabel="Upload Deal ✅" btnClass="btn-gold"
-            cropZoom={cropZoom} setCropZoom={setCropZoom} cropX={cropX} setCropX={setCropX} cropY={cropY} setCropY={setCropY} />
+          <DealForm
+            dealF={dealF}
+            setDealF={setDealF}
+            imagePreview={imagePreview}
+            onImageChange={handleImageChange}
+            posting={posting}
+            onPost={postDeal}
+            title="Upload Deal"
+            btnLabel="Upload Deal ✅"
+            btnClass="btn-gold"
+          />
 
           <h3 className="admin-list-title">Live Deals ({liveDeals.length})</h3>
           <div className="admin-list" style={{ marginBottom:24 }}>
