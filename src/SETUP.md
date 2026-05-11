@@ -204,7 +204,10 @@ Install the [Supabase CLI](https://supabase.com/docs/guides/cli), link the proje
 ```bash
 supabase functions deploy create-checkout-session
 supabase functions deploy stripe-webhook
+supabase functions deploy deal-sourcer-scan
 ```
+
+The **Deal Sourcer** UI calls `deal-sourcer-scan`: it fetches HTML server-side (so the browser avoids CORS blocks) and extracts lines that look like promotions. Authenticated users only; no extra secrets beyond the usual Edge Function env.
 
 In **Project Settings → Edge Functions → Secrets** (or via CLI), set:
 

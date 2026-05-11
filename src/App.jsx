@@ -14,59 +14,6 @@ const GENDERS    = ["Male","Female","Non-binary","Prefer not to say"];
 const EMOJIS     = ["🛍️","📱","👗","🏠","⚽","💄","✈️","🍕","🧸","📚","🚗","💊","💍","🏕️","🎮","🐾","🎵","🍫","🏋️","🖥️"];
 const TODAY      = new Date().toISOString().split("T")[0];
 
-/** ISO 3166-1 alpha-2 `gl` for Google regional results (Deal Sourcer) */
-const SOURCER_COUNTRIES = [
-  { gl: "tt", name: "Trinidad & Tobago" },
-  { gl: "ag", name: "Antigua and Barbuda" },
-  { gl: "bb", name: "Barbados" },
-  { gl: "jm", name: "Jamaica" },
-  { gl: "gy", name: "Guyana" },
-  { gl: "us", name: "United States" },
-  { gl: "ca", name: "Canada" },
-  { gl: "gb", name: "United Kingdom" },
-  { gl: "ie", name: "Ireland" },
-  { gl: "de", name: "Germany" },
-  { gl: "fr", name: "France" },
-  { gl: "es", name: "Spain" },
-  { gl: "it", name: "Italy" },
-  { gl: "nl", name: "Netherlands" },
-  { gl: "be", name: "Belgium" },
-  { gl: "se", name: "Sweden" },
-  { gl: "no", name: "Norway" },
-  { gl: "dk", name: "Denmark" },
-  { gl: "fi", name: "Finland" },
-  { gl: "pl", name: "Poland" },
-  { gl: "pt", name: "Portugal" },
-  { gl: "at", name: "Austria" },
-  { gl: "ch", name: "Switzerland" },
-  { gl: "au", name: "Australia" },
-  { gl: "nz", name: "New Zealand" },
-  { gl: "in", name: "India" },
-  { gl: "sg", name: "Singapore" },
-  { gl: "my", name: "Malaysia" },
-  { gl: "ph", name: "Philippines" },
-  { gl: "jp", name: "Japan" },
-  { gl: "kr", name: "South Korea" },
-  { gl: "br", name: "Brazil" },
-  { gl: "mx", name: "Mexico" },
-  { gl: "za", name: "South Africa" },
-  { gl: "ng", name: "Nigeria" },
-  { gl: "ke", name: "Kenya" },
-  { gl: "ae", name: "United Arab Emirates" },
-].sort((a, b) => (a.gl === "tt" ? -1 : b.gl === "tt" ? 1 : a.name.localeCompare(b.name)));
-
-const googleShoppingUrl = (query, gl) => {
-  const q = (query || "deals discounts").trim();
-  const params = new URLSearchParams({ tbm: "shop", q, gl, hl: "en" });
-  return `https://www.google.com/search?${params.toString()}`;
-};
-const googleDealsWebUrl = (query, gl) => {
-  const base = (query || "").trim();
-  const q = base ? `${base} discount OR sale OR deals` : "best deals discounts sale";
-  const params = new URLSearchParams({ q, gl, hl: "en" });
-  return `https://www.google.com/search?${params.toString()}`;
-};
-
 const finalPrice = d => +(+d.retail_price * (1 - +d.discount_pct / 100)).toFixed(2);
 const savings    = d => +(+d.retail_price - finalPrice(d)).toFixed(2);
 const fmt        = n => `TT$${Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
@@ -380,9 +327,23 @@ textarea.inp{resize:vertical;line-height:1.5}
 .empty h3{font-family:'Bebas Neue';font-size:36px;letter-spacing:2px;color:var(--text);margin-bottom:8px}
 .empty p{font-size:14px;max-width:280px;margin:0 auto 24px}
 
-.sourcer-hint{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:20px;max-width:560px}
-.sourcer-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
-.sourcer-note{font-size:11px;color:var(--text3);margin-top:20px;line-height:1.5;max-width:520px}
+.sourcer-hint{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:20px;max-width:620px}
+.sourcer-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;margin-bottom:10px}
+.sourcer-note{font-size:11px;color:var(--text3);margin-top:16px;line-height:1.5;max-width:560px}
+.sourcer-scan-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px}
+.sourcer-url-inp{flex:1;min-width:min(100%,260px)}
+.sourcer-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:12px;transition:border .18s}
+.sourcer-card:hover{border-color:var(--border2)}
+.sourcer-card-head{display:flex;gap:12px;align-items:flex-start}
+.sourcer-cb{margin-top:3px;width:18px;height:18px;cursor:pointer;accent-color:var(--primary);flex-shrink:0}
+.sourcer-card-title{font-weight:800;font-size:14px;color:var(--text);line-height:1.35}
+.sourcer-card-sn{font-size:12px;color:var(--text2);margin-top:6px;line-height:1.45}
+.sourcer-card-link{font-size:11px;margin-top:8px}
+.sourcer-card-link a{color:var(--gold);font-weight:700}
+.sourcer-draft-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+@media(max-width:520px){.sourcer-draft-grid{grid-template-columns:1fr}}
+.sourcer-warn{font-size:13px;color:var(--gold);margin-bottom:14px;line-height:1.5;max-width:560px}
+.sourcer-err{font-size:13px;color:var(--red);margin-bottom:14px;font-weight:600;line-height:1.45}
 .hero-sourcer-wrap{width:100%;max-width:min(620px,94vw);margin:0 auto 22px;padding:0 16px}
 .hero-sourcer{background:linear-gradient(145deg,var(--bg3),var(--card));border:1px solid var(--border2);border-radius:var(--radius-xl);padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;box-shadow:0 10px 36px rgba(0,0,0,.28)}
 .hero-sourcer-copy{flex:1;min-width:min(100%,220px)}
@@ -427,6 +388,7 @@ textarea.inp{resize:vertical;line-height:1.5}
 .notif{position:fixed;bottom:20px;right:20px;z-index:999;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius-lg);padding:13px 18px;font-size:13px;font-weight:700;box-shadow:0 8px 32px rgba(0,0,0,.5);animation:up .25s ease;max-width:300px;display:flex;align-items:center;gap:8px}
 .notif.success{border-color:rgba(0,230,118,.3);background:rgba(0,230,118,.05)}
 .notif.error{border-color:rgba(255,23,68,.3);background:rgba(255,23,68,.05)}
+.notif.info{border-color:rgba(255,208,0,.28);background:rgba(255,208,0,.07)}
 
 .cart-fab{position:relative}
 .cart-badge{position:absolute;top:-7px;right:-7px;background:var(--primary);color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center}
@@ -598,8 +560,14 @@ export default function Bazodeal() {
   const [cart, setCart]               = useState([]);
   const [liked, setLiked]             = useState(new Set());
   const [filterCat, setFilterCat]     = useState("All");
-  const [sourcerGl, setSourcerGl]       = useState("tt");
-  const [sourcerQ, setSourcerQ]         = useState("");
+  const [sourcerPageUrl, setSourcerPageUrl]   = useState("");
+  const [sourcerFetchBusy, setSourcerFetchBusy] = useState(false);
+  const [sourcerFetchErr, setSourcerFetchErr] = useState("");
+  const [sourcerFetchWarn, setSourcerFetchWarn] = useState(null);
+  const [sourcerSourceUrl, setSourcerSourceUrl] = useState("");
+  const [sourcerCandidates, setSourcerCandidates] = useState([]);
+  const [sourcerSelected, setSourcerSelected] = useState(() => new Set());
+  const [sourcerDrafts, setSourcerDrafts] = useState({});
   const [dropdown, setDropdown]       = useState(false);
   const [notif, setNotif]             = useState(null);
   const [formErr, setFormErr]         = useState("");
@@ -802,6 +770,21 @@ export default function Bazodeal() {
     }
   }, [view]);
 
+  // Deal Sourcer is account-only — pull-from-URL postings use your merchant identity.
+  useEffect(() => {
+    if (loading) return;
+    if (view !== "sourcer" || currentUser) return;
+    const t = window.setTimeout(() => {
+      setView("home");
+      if (window.location.hash === "#deal-sourcer") {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+      setAuth("login");
+      pop("Sign in to use Deal Sourcer — import promotions from your website or page into your Bazodeal listings.", "info");
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [loading, view, currentUser]);
+
   // Stripe return URLs: ?checkout=success | ?checkout=cancel
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -838,7 +821,7 @@ export default function Bazodeal() {
 
   const uploadImage = async () => {
     if (!imageFile || !currentUser) return null;
-    let processedImageFile = imageFile;
+    let processedImageFile;
     try {
       processedImageFile = await cropImageFile(imageFile, cropZoom, cropX, cropY);
     } catch (err) {
@@ -864,6 +847,20 @@ export default function Bazodeal() {
       pop(err.message || "Image upload failed unexpectedly.", "error");
       return null;
     }
+  };
+
+  /** Insert one deal row; retries without image_url when the column/schema rejects it. */
+  const persistDealInsert = async (payload) => {
+    let { error } = await supabase.from("deals").insert(payload);
+    let strippedImage = false;
+    if (error?.message?.includes("image_url")) {
+      const { image_url, ...withoutImage } = payload;
+      void image_url;
+      const retry = await supabase.from("deals").insert(withoutImage);
+      error = retry.error ?? null;
+      strippedImage = !error;
+    }
+    return { error, strippedImage };
   };
 
   // ── Auth ─────────────────────────────────────────────────
@@ -1018,23 +1015,184 @@ export default function Bazodeal() {
       image_url:  imageUrl,
     };
 
-    let { error } = await supabase.from("deals").insert(payload);
-
-    // Backward compatibility: older DB schemas may not have image_url yet.
-    if (error?.message?.includes("image_url")) {
-      const { image_url, ...payloadWithoutImage } = payload;
-      const retry = await supabase.from("deals").insert(payloadWithoutImage);
-      error = retry.error || null;
-      if (!error) {
-        pop("Deal posted without image. Add image_url column in Supabase to enable image uploads.", "error");
-      }
-    }
+    const { error, strippedImage } = await persistDealInsert(payload);
 
     setPosting(false);
-    if (error) { pop("Failed to post: " + error.message, "error"); return; }
+    if (error) {
+      pop("Failed to post: " + error.message, "error");
+      return;
+    }
+    if (strippedImage) {
+      pop("Deal posted without image. Add image_url column in Supabase to enable image uploads.", "error");
+    }
     await fetchDeals();
     resetDealForm();
     pop("Deal is live! ✅");
+  };
+
+  const toggleSourcerRow = (c, willSelect) => {
+    if (willSelect) {
+      setSourcerSelected((p) => new Set(p).add(c.id));
+      setSourcerDrafts((d) => ({
+        ...d,
+        [c.id]: d[c.id] || {
+          title: c.title,
+          retailPrice: "",
+          discountPct: "",
+          category: INTERESTS[0],
+        },
+      }));
+    } else {
+      setSourcerSelected((p) => {
+        const n = new Set(p);
+        n.delete(c.id);
+        return n;
+      });
+      setSourcerDrafts((d) => {
+        const next = { ...d };
+        delete next[c.id];
+        return next;
+      });
+    }
+  };
+
+  const patchSourcerDraft = (id, patch) => {
+    setSourcerDrafts((d) => ({ ...d, [id]: { ...d[id], ...patch } }));
+  };
+
+  const scanSourcerUrl = async () => {
+    if (!currentUser) { setAuth("login"); return; }
+    const raw = sourcerPageUrl.trim();
+    if (!raw) { pop("Paste the URL of your website or promotions page.", "error"); return; }
+    setSourcerFetchBusy(true);
+    setSourcerFetchErr("");
+    setSourcerFetchWarn(null);
+    setSourcerCandidates([]);
+    setSourcerSelected(new Set());
+    setSourcerDrafts({});
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        pop("Please sign in again.", "error");
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke("deal-sourcer-scan", {
+        body: { url: raw },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (error) {
+        pop(
+          error.message || "Scan failed. Deploy the deal-sourcer-scan Edge Function in Supabase (see repo).",
+          "error",
+        );
+        return;
+      }
+      if (data?.error) {
+        setSourcerFetchErr(typeof data.error === "string" ? data.error : "Scan failed.");
+        return;
+      }
+      const list = Array.isArray(data?.candidates) ? data.candidates : [];
+      setSourcerCandidates(list);
+      setSourcerSourceUrl(typeof data?.sourceUrl === "string" ? data.sourceUrl : raw);
+      if (data?.warning) setSourcerFetchWarn(data.warning);
+      if (list.length) pop(`Found ${list.length} candidate lines — tick the ones to post under your account.`);
+    } catch (e) {
+      pop(e?.message || "Scan failed.", "error");
+    } finally {
+      setSourcerFetchBusy(false);
+    }
+  };
+
+  const postSelectedSourcerDeals = async () => {
+    if (!currentUser || !profile) { setAuth("login"); return; }
+    const ids = [...sourcerSelected];
+    if (ids.length === 0) { pop("Select at least one line to post.", "error"); return; }
+
+    for (const id of ids) {
+      const dr = sourcerDrafts[id];
+      const c = sourcerCandidates.find((x) => x.id === id);
+      if (!c || !dr?.title?.trim() || dr.retailPrice === "" || dr.discountPct === "") {
+        pop("Each selected row needs a title, retail price, and discount %.", "error");
+        return;
+      }
+      const rp = parseFloat(dr.retailPrice);
+      const dp = parseFloat(dr.discountPct);
+      if (!Number.isFinite(rp) || rp <= 0 || !Number.isFinite(dp) || dp <= 0 || dp >= 100) {
+        pop("Retail price must be greater than zero and discount must be between 1 and 99.", "error");
+        return;
+      }
+    }
+
+    if (profile.role !== "admin") {
+      const todayKey = todayLocalKey();
+      const limit = Math.max(1, parseInt(profile?.concurrent_deals_limit ?? 1, 10) || 1);
+      const { data: activeDeals, error: activeErr } = await supabase
+        .from("deals")
+        .select("id")
+        .eq("merchant_id", currentUser.id)
+        .eq("approved", true)
+        .or(`expires_at.is.null,expires_at.gte.${todayKey}`);
+      if (activeErr) {
+        pop("Could not verify active deals. Try again.", "error");
+        return;
+      }
+      const activeCount = activeDeals?.length || 0;
+      const room = limit - activeCount;
+      if (ids.length > room) {
+        pop(
+          room <= 0
+            ? `You already have the maximum active deals (${limit}) for your account. Wait for one to expire or upgrade your limit.`
+            : `Select at most ${room} row(s): your plan allows ${limit} active deal(s), and ${activeCount} are already live.`,
+          "error",
+        );
+        return;
+      }
+    }
+
+    setPosting(true);
+    let posted = 0;
+    let strippedAny = false;
+    for (const id of ids) {
+      const dr = sourcerDrafts[id];
+      const c = sourcerCandidates.find((x) => x.id === id);
+      const pieces = [
+        dr.title.trim(),
+        c.snippet && c.snippet !== dr.title.trim() ? String(c.snippet) : null,
+        c.linkUrl ? `Link: ${c.linkUrl}` : null,
+        sourcerSourceUrl ? `Imported from: ${sourcerSourceUrl}` : null,
+      ].filter(Boolean);
+      const payload = {
+        title: dr.title.trim().slice(0, 200),
+        merchant_id: currentUser.id,
+        merchant_name: profile?.name || "Merchant",
+        category: dr.category || INTERESTS[0],
+        emoji: "🛍️",
+        retail_price: parseFloat(dr.retailPrice),
+        discount_pct: parseFloat(dr.discountPct),
+        description: pieces.join("\n\n"),
+        stock: 99,
+        expires_at: null,
+        approved: true,
+        image_url: null,
+      };
+      const { error, strippedImage } = await persistDealInsert(payload);
+      if (strippedImage) strippedAny = true;
+      if (error) {
+        pop(`Posting stopped: ${error.message}`, "error");
+        setPosting(false);
+        return;
+      }
+      posted += 1;
+    }
+    setPosting(false);
+    if (strippedAny) {
+      pop("Some deals posted without images — add image_url to your deals table to attach photos.", "error");
+    }
+    await fetchDeals();
+    setSourcerSelected(new Set());
+    setSourcerDrafts({});
+    pop(posted === 1 ? "1 deal is now live under your account." : `${posted} deals are now live under your account.`);
+    setView("merchant");
   };
 
   const removeDeal = async (id) => {
@@ -1233,20 +1391,20 @@ export default function Bazodeal() {
               Page
             </a>
           </div>
-          <button
-            type="button"
-            className="btn btn-gold btn-sm"
-            onClick={e => {
-              e.stopPropagation();
-              setView("sourcer");
-              window.location.hash = "deal-sourcer";
-            }}
-            title="Hunt discounts online by country — free shopper tool on Bazodeal"
-          >
-            Deal Sourcer
-          </button>
           {currentUser && profile ? (
             <>
+              <button
+                type="button"
+                className="btn btn-gold btn-sm"
+                onClick={e => {
+                  e.stopPropagation();
+                  setView("sourcer");
+                  window.location.hash = "deal-sourcer";
+                }}
+                title="Import promotions from your own website or page into your Bazodeal listings"
+              >
+                Deal Sourcer
+              </button>
               {profile.role === "admin" && (
                 <button className="btn btn-ghost btn-sm" onClick={async () => {
                   setView("admin");
@@ -1306,28 +1464,50 @@ export default function Bazodeal() {
             <div className="hero-lead-wrap" aria-label="Site tagline">
               <p className="hero-lead">{`Get Bazodee!! with our Big Daily Deals from Trinidad and Tobago's #1 DEAL SITE`}</p>
             </div>
-            <div className="hero-sourcer-wrap">
-              <div className="hero-sourcer" role="region" aria-label="Deal Sourcer">
-                <div className="hero-sourcer-copy">
-                  <div className="hero-sourcer-k">For shoppers · Free on Bazodeal</div>
-                  <div className="hero-sourcer-t">Deal Sourcer — hunt discounts around the web by country</div>
-                  <div className="hero-sourcer-t2">
-                    Choose a region, add what you’re shopping for, and open Google Shopping or web deals in a new tab. Bazodeal’s board is still home for local steals.
+            {currentUser && profile ? (
+              <div className="hero-sourcer-wrap">
+                <div className="hero-sourcer" role="region" aria-label="Deal Sourcer">
+                  <div className="hero-sourcer-copy">
+                    <div className="hero-sourcer-k">Merchants · Account feature</div>
+                    <div className="hero-sourcer-t">Deal Sourcer — pull promos from your site or page</div>
+                    <div className="hero-sourcer-t2">
+                      Paste your shop or Facebook preview URL, scan for deal-style wording, pick lines, add TT$ price and discount, and post under your Bazodeal account — no retyping the same copy.
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    className="btn btn-gold btn-sm"
+                    style={{ alignSelf:"center", flexShrink:0 }}
+                    onClick={() => {
+                      setView("sourcer");
+                      window.location.hash = "deal-sourcer";
+                    }}
+                  >
+                    Open Deal Sourcer
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-gold btn-sm"
-                  style={{ alignSelf:"center", flexShrink:0 }}
-                  onClick={() => {
-                    setView("sourcer");
-                    window.location.hash = "deal-sourcer";
-                  }}
-                >
-                  Open Deal Sourcer
-                </button>
               </div>
-            </div>
+            ) : (
+              <div className="hero-sourcer-wrap">
+                <div className="hero-sourcer" role="region" aria-label="Deal Sourcer signup">
+                  <div className="hero-sourcer-copy">
+                    <div className="hero-sourcer-k">Merchants · Free account required</div>
+                    <div className="hero-sourcer-t">Deal Sourcer imports promos from your website</div>
+                    <div className="hero-sourcer-t2">
+                      Join Bazodeal to scan a page you own for discounts, deals, and offers — then publish what you choose as your marketplace listings.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-pri btn-sm"
+                    style={{ alignSelf:"center", flexShrink:0 }}
+                    onClick={() => setAuth("register")}
+                  >
+                    Create free account
+                  </button>
+                </div>
+              </div>
+            )}
             {featuredSlides.length > 0 ? (
               <div
                 className="hero-carousel hero-carousel-hoverzone"
@@ -1477,8 +1657,8 @@ export default function Bazodeal() {
         </>
       )}
 
-      {/* ══ DEAL SOURCER (regional web search — user feature on bazodeal.com) ══ */}
-      {view === "sourcer" && (
+      {/* ══ DEAL SOURCER (import from your URL → post as your deals — signed-in only) ══ */}
+      {view === "sourcer" && currentUser && profile && (
         <div className="page">
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12, marginBottom:8 }}>
             <h1 className="page-title" style={{ margin:0 }}>Deal Sourcer</h1>
@@ -1487,46 +1667,133 @@ export default function Bazodeal() {
             </button>
           </div>
           <p className="sourcer-hint">
-            Built for Bazodeal members and guests — pick a country so results lean toward that region (shipping, stores, and price context).
-            Your marketplace stays on Home; Deal Sourcer opens Google in a new tab to browse wider online offers.
+            Enter a public page that lists promotions in text (your site, landing page, or link-in-bio shop). Bazodeal scans for wording like&nbsp;
+            <em>discount</em>, <em>deal</em>, <em>offer</em>, <em>sale</em>, <em>save</em>, <em>promo</em>, or&nbsp;
+            <em>% off</em>. Tick the rows you want, add TT$ pricing, then publish — listings use your merchant name.&nbsp;
+            Facebook and similar sites often block automated reads; try a publicly readable web page instead.
           </p>
-          <div className="fg">
-            <label>Country / region</label>
-            <select className="inp" value={sourcerGl} onChange={e => setSourcerGl(e.target.value)}>
-              {SOURCER_COUNTRIES.map(c => (
-                <option key={c.gl} value={c.gl}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="fg">
-            <label>What are you looking for? (optional)</label>
-            <input
-              className="inp"
-              placeholder="e.g. wireless earbuds, kitchen blender, kids toys"
-              value={sourcerQ}
-              onChange={e => setSourcerQ(e.target.value)}
-            />
-          </div>
-          <div className="sourcer-actions">
-            <a
+          <div className="sourcer-scan-row">
+            <div className="fg sourcer-url-inp" style={{ marginBottom:0 }}>
+              <label>Page URL to scan</label>
+              <input
+                className="inp"
+                type="url"
+                placeholder="https://yoursite.com/sale or blog post URL"
+                value={sourcerPageUrl}
+                onChange={(e) => setSourcerPageUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && scanSourcerUrl()}
+              />
+            </div>
+            <button
+              type="button"
               className="btn btn-pri btn-sm"
-              href={googleShoppingUrl(sourcerQ, sourcerGl)}
-              target="_blank"
-              rel="noopener noreferrer"
+              style={{ marginBottom:14 }}
+              disabled={sourcerFetchBusy || posting}
+              onClick={() => scanSourcerUrl()}
             >
-              Google Shopping
-            </a>
-            <a
-              className="btn btn-gold btn-sm"
-              href={googleDealsWebUrl(sourcerQ, sourcerGl)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Web: deals & sales
-            </a>
+              {sourcerFetchBusy ? <>⏳ Scanning…</> : "Scan page"}
+            </button>
           </div>
+          {sourcerFetchErr && <div className="sourcer-err">{sourcerFetchErr}</div>}
+          {sourcerFetchWarn && <div className="sourcer-warn">{sourcerFetchWarn}</div>}
+          {sourcerCandidates.length > 0 && (
+            <>
+              <p style={{ fontSize:12, color:"var(--text3)", marginBottom:10 }}>
+                Showing {sourcerCandidates.length} candidate line(s){sourcerSourceUrl ? <> from&nbsp;
+                  <a href={sourcerSourceUrl} target="_blank" rel="noopener noreferrer" style={{ color:"var(--gold)" }}>{sourcerSourceUrl}</a></> : null}.
+              </p>
+              <div style={{ marginBottom:16 }}>
+                {sourcerCandidates.map((c) => {
+                  const on = sourcerSelected.has(c.id);
+                  const dr = sourcerDrafts[c.id];
+                  return (
+                    <div key={c.id} className="sourcer-card">
+                      <div className="sourcer-card-head">
+                        <input
+                          type="checkbox"
+                          className="sourcer-cb"
+                          checked={on}
+                          onChange={(e) => toggleSourcerRow(c, e.target.checked)}
+                          aria-label={`Select: ${c.title.slice(0, 80)}`}
+                        />
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div className="sourcer-card-title">{c.title}</div>
+                          {c.snippet && c.snippet !== c.title && (
+                            <div className="sourcer-card-sn">{c.snippet}</div>
+                          )}
+                          {c.linkUrl ? (
+                            <div className="sourcer-card-link">
+                              <a href={c.linkUrl} target="_blank" rel="noopener noreferrer">Open linked URL</a>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                      {on && dr ? (
+                        <div className="sourcer-draft-grid">
+                          <div className="fg" style={{ marginBottom:0, gridColumn:"1/-1" }}>
+                            <label>Listing title</label>
+                            <input
+                              className="inp"
+                              value={dr.title}
+                              onChange={(e) => patchSourcerDraft(c.id, { title: e.target.value })}
+                            />
+                          </div>
+                          <div className="fg" style={{ marginBottom:0 }}>
+                            <label>Retail (TT$)</label>
+                            <input
+                              className="inp"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder="Was price"
+                              value={dr.retailPrice}
+                              onChange={(e) => patchSourcerDraft(c.id, { retailPrice: e.target.value })}
+                            />
+                          </div>
+                          <div className="fg" style={{ marginBottom:0 }}>
+                            <label>Discount %</label>
+                            <input
+                              className="inp"
+                              type="number"
+                              min="1"
+                              max="99"
+                              placeholder="e.g. 25"
+                              value={dr.discountPct}
+                              onChange={(e) => patchSourcerDraft(c.id, { discountPct: e.target.value })}
+                            />
+                          </div>
+                          <div className="fg" style={{ marginBottom:0, gridColumn:"1/-1" }}>
+                            <label>Category</label>
+                            <select
+                              className="inp"
+                              value={dr.category}
+                              onChange={(e) => patchSourcerDraft(c.id, { category: e.target.value })}
+                            >
+                              {INTERESTS.map((i) => <option key={i}>{i}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="sourcer-actions">
+                <button
+                  type="button"
+                  className="btn btn-gold btn-sm"
+                  disabled={posting || sourcerSelected.size === 0}
+                  onClick={() => postSelectedSourcerDeals()}
+                >
+                  {posting ? "Posting…" : `Post selected (${sourcerSelected.size}) to Bazodeal`}
+                </button>
+              </div>
+            </>
+          )}
           <p className="sourcer-note">
-            Results depend on Google and third-party sites. Always check the seller, returns, and whether they ship to you before you buy.
+            Requires the&nbsp;
+            <code style={{ fontSize:11, color:"var(--text2)" }}>deal-sourcer-scan</code>
+            &nbsp;Edge Function in your Supabase project. You are responsible for content you publish; scan only sites you&apos;re allowed to reuse.
           </p>
         </div>
       )}
