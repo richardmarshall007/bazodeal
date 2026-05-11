@@ -14,8 +14,8 @@ const GENDERS    = ["Male","Female","Non-binary","Prefer not to say"];
 const EMOJIS     = ["🛍️","📱","👗","🏠","⚽","💄","✈️","🍕","🧸","📚","🚗","💊","💍","🏕️","🎮","🐾","🎵","🍫","🏋️","🖥️"];
 const TODAY      = new Date().toISOString().split("T")[0];
 
-/** ISO 3166-1 alpha-2 `gl` for Google regional results (Discount Finder) */
-const FINDER_COUNTRIES = [
+/** ISO 3166-1 alpha-2 `gl` for Google regional results (Deal Sourcer) */
+const SOURCER_COUNTRIES = [
   { gl: "tt", name: "Trinidad & Tobago" },
   { gl: "ag", name: "Antigua and Barbuda" },
   { gl: "bb", name: "Barbados" },
@@ -380,9 +380,15 @@ textarea.inp{resize:vertical;line-height:1.5}
 .empty h3{font-family:'Bebas Neue';font-size:36px;letter-spacing:2px;color:var(--text);margin-bottom:8px}
 .empty p{font-size:14px;max-width:280px;margin:0 auto 24px}
 
-.finder-hint{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:20px;max-width:560px}
-.finder-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
-.finder-note{font-size:11px;color:var(--text3);margin-top:20px;line-height:1.5;max-width:520px}
+.sourcer-hint{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:20px;max-width:560px}
+.sourcer-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.sourcer-note{font-size:11px;color:var(--text3);margin-top:20px;line-height:1.5;max-width:520px}
+.hero-sourcer-wrap{width:100%;max-width:min(620px,94vw);margin:0 auto 22px;padding:0 16px}
+.hero-sourcer{background:linear-gradient(145deg,var(--bg3),var(--card));border:1px solid var(--border2);border-radius:var(--radius-xl);padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;box-shadow:0 10px 36px rgba(0,0,0,.28)}
+.hero-sourcer-copy{flex:1;min-width:min(100%,220px)}
+.hero-sourcer-k{font-size:10px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:1.6px}
+.hero-sourcer-t{font-size:clamp(15px,2.4vw,17px);font-weight:800;color:var(--text);line-height:1.35;margin-top:5px}
+.hero-sourcer-t2{font-size:12px;color:var(--text2);margin-top:7px;line-height:1.45;max-width:34em}
 
 .dash{padding:36px 24px 60px;max-width:960px;margin:0 auto}
 .dash-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:28px;flex-wrap:wrap;gap:12px}
@@ -579,7 +585,11 @@ function DealForm({
 
 // ── Main Component ────────────────────────────────────────────
 export default function Bazodeal() {
-  const [view, setView]               = useState("home");
+  const [view, setView]               = useState(() =>
+    typeof window !== "undefined" && window.location.hash.replace(/^#/, "") === "deal-sourcer"
+      ? "sourcer"
+      : "home"
+  );
   const [auth, setAuth]               = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [profile, setProfile]         = useState(null);
@@ -588,8 +598,8 @@ export default function Bazodeal() {
   const [cart, setCart]               = useState([]);
   const [liked, setLiked]             = useState(new Set());
   const [filterCat, setFilterCat]     = useState("All");
-  const [finderGl, setFinderGl]       = useState("tt");
-  const [finderQ, setFinderQ]         = useState("");
+  const [sourcerGl, setSourcerGl]       = useState("tt");
+  const [sourcerQ, setSourcerQ]         = useState("");
   const [dropdown, setDropdown]       = useState(false);
   const [notif, setNotif]             = useState(null);
   const [formErr, setFormErr]         = useState("");
@@ -776,6 +786,21 @@ export default function Bazodeal() {
 
     return () => { subscription.unsubscribe(); };
   }, [fetchDeals, fetchProfile, fetchCart, fetchLikes, fetchAllUsers, ensureProfile]);
+
+  // Deep link for production: www.bazodeal.com/#deal-sourcer
+  useEffect(() => {
+    const onHash = () => {
+      if (window.location.hash.replace(/^#/, "") === "deal-sourcer") setView("sourcer");
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  useEffect(() => {
+    if (view !== "sourcer" && window.location.hash === "#deal-sourcer") {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }, [view]);
 
   // Stripe return URLs: ?checkout=success | ?checkout=cancel
   useEffect(() => {
@@ -1210,14 +1235,15 @@ export default function Bazodeal() {
           </div>
           <button
             type="button"
-            className="btn btn-ghost btn-sm"
+            className="btn btn-gold btn-sm"
             onClick={e => {
               e.stopPropagation();
-              setView("finder");
+              setView("sourcer");
+              window.location.hash = "deal-sourcer";
             }}
-            title="Search the web for deals in a chosen country"
+            title="Hunt discounts online by country — free shopper tool on Bazodeal"
           >
-            🔍 Finder
+            Deal Sourcer
           </button>
           {currentUser && profile ? (
             <>
@@ -1245,6 +1271,14 @@ export default function Bazodeal() {
                     <div className="dd-name">{profile.name}</div>
                     <div className="dd-email">{currentUser.email}</div>
                     <div className="dd-item" onClick={() => { setView("home"); setDropdown(false); }}>🏠 Home</div>
+                    <div
+                      className="dd-item"
+                      onClick={() => {
+                        setView("sourcer");
+                        setDropdown(false);
+                        window.location.hash = "deal-sourcer";
+                      }}
+                    >🌐 Deal Sourcer</div>
                     {profile.role === "admin" && <div className="dd-item" style={{ color:"var(--primary)" }}>⚡ Admin Access</div>}
                     <div className="dd-item danger" onClick={doLogout}>🚪 Log Out</div>
                   </div>
@@ -1271,6 +1305,28 @@ export default function Bazodeal() {
           <div className="hero">
             <div className="hero-lead-wrap" aria-label="Site tagline">
               <p className="hero-lead">{`Get Bazodee!! with our Big Daily Deals from Trinidad and Tobago's #1 DEAL SITE`}</p>
+            </div>
+            <div className="hero-sourcer-wrap">
+              <div className="hero-sourcer" role="region" aria-label="Deal Sourcer">
+                <div className="hero-sourcer-copy">
+                  <div className="hero-sourcer-k">For shoppers · Free on Bazodeal</div>
+                  <div className="hero-sourcer-t">Deal Sourcer — hunt discounts around the web by country</div>
+                  <div className="hero-sourcer-t2">
+                    Choose a region, add what you’re shopping for, and open Google Shopping or web deals in a new tab. Bazodeal’s board is still home for local steals.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-gold btn-sm"
+                  style={{ alignSelf:"center", flexShrink:0 }}
+                  onClick={() => {
+                    setView("sourcer");
+                    window.location.hash = "deal-sourcer";
+                  }}
+                >
+                  Open Deal Sourcer
+                </button>
+              </div>
             </div>
             {featuredSlides.length > 0 ? (
               <div
@@ -1421,21 +1477,23 @@ export default function Bazodeal() {
         </>
       )}
 
-      {/* ══ DISCOUNT FINDER (regional web search) ══ */}
-      {view === "finder" && (
+      {/* ══ DEAL SOURCER (regional web search — user feature on bazodeal.com) ══ */}
+      {view === "sourcer" && (
         <div className="page">
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12, marginBottom:8 }}>
-            <h1 className="page-title" style={{ margin:0 }}>🔍 Discount Finder</h1>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setView("home")}>← Back to deals</button>
+            <h1 className="page-title" style={{ margin:0 }}>Deal Sourcer</h1>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setView("home")}>
+              ← Back to deals
+            </button>
           </div>
-          <p className="finder-hint">
-            Pick a country so search engines bias results to that region (shipping, local retailers, and currency context).
-            Bazodeal listings stay on Home; this opens Google in a new tab for broader online deals.
+          <p className="sourcer-hint">
+            Built for Bazodeal members and guests — pick a country so results lean toward that region (shipping, stores, and price context).
+            Your marketplace stays on Home; Deal Sourcer opens Google in a new tab to browse wider online offers.
           </p>
           <div className="fg">
             <label>Country / region</label>
-            <select className="inp" value={finderGl} onChange={e => setFinderGl(e.target.value)}>
-              {FINDER_COUNTRIES.map(c => (
+            <select className="inp" value={sourcerGl} onChange={e => setSourcerGl(e.target.value)}>
+              {SOURCER_COUNTRIES.map(c => (
                 <option key={c.gl} value={c.gl}>{c.name}</option>
               ))}
             </select>
@@ -1445,14 +1503,14 @@ export default function Bazodeal() {
             <input
               className="inp"
               placeholder="e.g. wireless earbuds, kitchen blender, kids toys"
-              value={finderQ}
-              onChange={e => setFinderQ(e.target.value)}
+              value={sourcerQ}
+              onChange={e => setSourcerQ(e.target.value)}
             />
           </div>
-          <div className="finder-actions">
+          <div className="sourcer-actions">
             <a
               className="btn btn-pri btn-sm"
-              href={googleShoppingUrl(finderQ, finderGl)}
+              href={googleShoppingUrl(sourcerQ, sourcerGl)}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -1460,15 +1518,15 @@ export default function Bazodeal() {
             </a>
             <a
               className="btn btn-gold btn-sm"
-              href={googleDealsWebUrl(finderQ, finderGl)}
+              href={googleDealsWebUrl(sourcerQ, sourcerGl)}
               target="_blank"
               rel="noopener noreferrer"
             >
               Web: deals & sales
             </a>
           </div>
-          <p className="finder-note">
-            Results depend on Google and merchants in that country. Always verify the seller, return policy, and whether they ship to your address.
+          <p className="sourcer-note">
+            Results depend on Google and third-party sites. Always check the seller, returns, and whether they ship to you before you buy.
           </p>
         </div>
       )}
