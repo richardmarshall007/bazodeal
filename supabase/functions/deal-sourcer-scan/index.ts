@@ -12,6 +12,96 @@ const corsHeaders: Record<string, string> = {
 const KEYWORD_RE =
   /\b(deal|deals|discount|discounted|offer|offers|sale|on sale|save|promo|promotion|clearance|special|%\s*off|percent\s+off|price drop)\b/i;
 
+/** Require a concrete price / percent / savings cue (not just “special” or “contact us for deals”). */
+const DISCOUNT_SIGNAL_RE =
+  /\d+\s*%|%\s*off|(?:save|saving|less)\s+(?:tt\$?|\$|£|€)?\s*\d[\d,]*|(?:\$|£|€)\d[\d,]*(?:\.\d+)?|tt\$?\s*\d[\d,]*|was\b[\s\S]{0,48}\bnow\b|half\s+price|bogo|buy\s+one\s+get|\d+\s*off\b|price\s+drop|mark\s*down|knock\s*down|slashed/i;
+
+const NAV_PATH_SEGMENT = new Set([
+  "contact",
+  "contact-us",
+  "contactus",
+  "about",
+  "about-us",
+  "privacy",
+  "privacy-policy",
+  "terms",
+  "terms-of-service",
+  "terms-of-use",
+  "legal",
+  "cookie",
+  "cookies",
+  "help",
+  "support",
+  "faq",
+  "login",
+  "signin",
+  "sign-in",
+  "signup",
+  "sign-up",
+  "register",
+  "cart",
+  "basket",
+  "checkout",
+  "account",
+  "my-account",
+  "wishlist",
+  "unsubscribe",
+  "locations",
+  "store-locator",
+  "find-us",
+  "careers",
+  "jobs",
+]);
+
+function isNavOrUtilityUrl(href: string): boolean {
+  let path: string;
+  try {
+    path = new URL(href).pathname.toLowerCase();
+  } catch {
+    return true;
+  }
+  const segments = path.split("/").filter(Boolean);
+  for (const seg of segments) {
+    if (NAV_PATH_SEGMENT.has(seg)) return true;
+  }
+  return false;
+}
+
+function scoreDealLinkPath(pathname: string): number {
+  const p = pathname.toLowerCase();
+  let s = 0;
+  if (/\/(products?|shop|collections?|items?|catalog|store|category|categories|brands?|sale|deals|promo|offers)\b/.test(p)) s += 5;
+  if (/\/(p|pd|gp|dp)\//.test(p)) s += 3;
+  if (/\d{2,}/.test(p.replace(/[^/0-9]/g, ""))) s += 2;
+  if (p.split("/").filter(Boolean).length >= 2) s += 1;
+  return s;
+}
+
+/** Pick the best non-utility <a href> inside an HTML fragment (same block or surrounding markup). */
+function extractBestDealLinkFromHtml(
+  htmlFragment: string,
+  baseOrigin: string,
+  basePath: string,
+): string | null {
+  const hrefRe = /<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi;
+  const scored: { url: string; score: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = hrefRe.exec(htmlFragment)) !== null) {
+    const abs = resolveHref(m[1], baseOrigin, basePath);
+    if (!abs || isNavOrUtilityUrl(abs)) continue;
+    let score = 1;
+    try {
+      score += scoreDealLinkPath(new URL(abs).pathname);
+    } catch {
+      continue;
+    }
+    scored.push({ url: abs, score });
+  }
+  if (!scored.length) return null;
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].url;
+}
+
 function stripTags(html: string): string {
   return html
     .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
@@ -97,6 +187,7 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
     if (title.length < 8 && snippet.length < 20) return;
     const blob = `${title} ${snippet}`;
     if (!KEYWORD_RE.test(blob)) return;
+    if (!DISCOUNT_SIGNAL_RE.test(blob)) return;
     const key = blob.slice(0, 96).toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
@@ -114,7 +205,10 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
   const hre = /<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/gi;
   while ((m = hre.exec(html)) !== null) {
     const text = stripTags(m[1]);
-    pushUnique(text, text, null);
+    const start = m.index ?? 0;
+    const afterHeading = html.slice(start, start + 1400);
+    const linkGuess = extractBestDealLinkFromHtml(afterHeading, baseOrigin, basePath);
+    pushUnique(text, text, linkGuess);
     if (out.length >= 45) break;
   }
 
@@ -131,7 +225,16 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
     } catch {
       abs = null;
     }
-    pushUnique(inner, inner, abs);
+    const matchStart = m.index ?? 0;
+    const contextSlice = html.slice(matchStart, matchStart + 1800);
+    let linkUrl: string | null = null;
+    if (abs && !isNavOrUtilityUrl(abs)) linkUrl = abs;
+    if (!linkUrl) {
+      linkUrl =
+        extractBestDealLinkFromHtml(m[0], baseOrigin, basePath) ||
+        extractBestDealLinkFromHtml(contextSlice, baseOrigin, basePath);
+    }
+    pushUnique(inner, inner, linkUrl);
     if (out.length >= 55) break;
   }
 
@@ -142,7 +245,8 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
     if (text.length < 35 || text.length > 900) continue;
     if (!KEYWORD_RE.test(text)) continue;
     const line = text.slice(0, 220);
-    pushUnique(line, text, null);
+    const bestInBlock = extractBestDealLinkFromHtml(chunk, baseOrigin, basePath);
+    pushUnique(line, text, bestInBlock);
   }
 
   return out.slice(0, 36);
@@ -289,7 +393,7 @@ Deno.serve(async (req) => {
   attachImagesToCandidates(candidates, pageImages);
   const warning =
     candidates.length === 0
-      ? "No deal-style lines found (keywords: discount, deal, offer, sale, save, promo, % off). Many social sites block imports — try your public shop or blog URL, or a page that lists promotions in text."
+      ? "No deal-style lines found. Lines need both a promo keyword and a clear discount cue (e.g. a %, TT$/price, “save $…”, was/now). Contact and policy links are ignored for the deal URL. Many social sites block imports — try your public shop or blog URL."
       : null;
 
   return new Response(JSON.stringify({ candidates, sourceUrl: target.href, warning }), {

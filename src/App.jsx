@@ -1821,7 +1821,7 @@ export default function Bazodeal() {
           <p className="sourcer-hint">
             Enter a public page that lists promotions in text (your site, landing page, or link-in-bio shop). The scan also picks up <strong>images</strong> (Open Graph, Twitter card, then regular <strong>img</strong> URLs) and pairs them with promo rows <strong>in order</strong> — verify the thumbnail matches the deal before you post. Bazodeal scans for wording like&nbsp;
             <em>discount</em>, <em>deal</em>, <em>offer</em>, <em>sale</em>, <em>save</em>, <em>promo</em>, or&nbsp;
-            <em>% off</em>. Tick the rows you want, add TT$ pricing, then publish — listings use your merchant name.&nbsp;
+            <em>% off</em>, plus a visible savings cue (percent, TT$/money, was/now, etc.). Rows skip footer links like Contact/About and prefer shop/product URLs when the page offers them. Tick the rows you want, add TT$ pricing, then publish — listings use your merchant name.&nbsp;
             Facebook and similar sites often block automated reads; try a publicly readable web page instead.
           </p>
           <div className="sourcer-scan-row">
