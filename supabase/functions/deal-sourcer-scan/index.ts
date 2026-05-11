@@ -71,7 +71,8 @@ function scoreDealLinkPath(pathname: string): number {
   const p = pathname.toLowerCase();
   let s = 0;
   if (/\/(products?|shop|collections?|items?|catalog|store|category|categories|brands?|sale|deals|promo|offers)\b/.test(p)) s += 5;
-  if (/\/(p|pd|gp|dp)\//.test(p)) s += 3;
+  // Magento-style product URLs often end with `/.../p` (no trailing slash).
+  if (/\/(p|pd|gp|dp)(?:\/|$)/i.test(p)) s += 3;
   if (/\d{2,}/.test(p.replace(/[^/0-9]/g, ""))) s += 2;
   if (p.split("/").filter(Boolean).length >= 2) s += 1;
   return s;
@@ -102,11 +103,29 @@ function extractBestDealLinkFromHtml(
   return scored[0].url;
 }
 
+/** Decode a few entities so alt/title text survives for matching (e.g. Magento `alt="A&#x20;B"`). */
+function decodeBasicHtmlEntities(s: string): string {
+  return s
+    .replace(/&#x20;/gi, " ")
+    .replace(/&#32;/g, " ")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&#x2f;/gi, "/")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
 function stripTags(html: string): string {
   return html
     .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
     .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
     .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
+    // Keep image alt text — many storefronts put the product name only in img alt inside the product link.
+    .replace(/<img\b[^>]*\balt=["']([^"']*)["'][^>]*>/gi, (_, alt) => ` ${decodeBasicHtmlEntities(alt)} `)
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -181,12 +200,22 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
   const out: Candidate[] = [];
   const seen = new Set<string>();
 
-  const pushUnique = (titleRaw: string, snippetRaw: string, linkUrl: string | null) => {
+  const pushUnique = (
+    titleRaw: string,
+    snippetRaw: string,
+    linkUrl: string | null,
+    /** Extra plain text for keyword / % checks only (e.g. prices beside an image-only product `<a>`). */
+    matchAugment: string | null = null,
+  ) => {
     const title = norm(titleRaw).slice(0, 160);
     const snippet = norm(snippetRaw).slice(0, 520);
     if (title.length < 8 && snippet.length < 20) return;
-    const blob = `${title} ${snippet}`;
-    if (!KEYWORD_RE.test(blob)) return;
+    const blob = norm(`${title} ${snippet} ${matchAugment || ""}`.slice(0, 2500));
+    const hasPromoKeyword = KEYWORD_RE.test(blob);
+    const hasRetailDiscountCue =
+      /\d+\s*%/.test(blob) &&
+      /(?:tt\$?\s*[\d,.]+|\$[\d,.]+|£[\d,.]+|€[\d,.]+)/i.test(blob);
+    if (!hasPromoKeyword && !hasRetailDiscountCue) return;
     if (!DISCOUNT_SIGNAL_RE.test(blob)) return;
     const key = blob.slice(0, 96).toLowerCase();
     if (seen.has(key)) return;
@@ -217,7 +246,10 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
     const href = m[1].trim();
     if (href.startsWith("javascript:") || href.startsWith("mailto:") || href === "#") continue;
     const inner = stripTags(m[2]);
-    if (inner.length < 12) continue;
+    const matchStart = m.index ?? 0;
+    const contextSlice = html.slice(matchStart, matchStart + 2200);
+    const contextText = stripTags(contextSlice).slice(0, 2400);
+    if (norm(`${inner} ${contextText}`).length < 16) continue;
     let abs: string | null = null;
     try {
       const u = new URL(href, baseOrigin + basePath);
@@ -225,8 +257,6 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
     } catch {
       abs = null;
     }
-    const matchStart = m.index ?? 0;
-    const contextSlice = html.slice(matchStart, matchStart + 1800);
     let linkUrl: string | null = null;
     if (abs && !isNavOrUtilityUrl(abs)) linkUrl = abs;
     if (!linkUrl) {
@@ -234,7 +264,7 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
         extractBestDealLinkFromHtml(m[0], baseOrigin, basePath) ||
         extractBestDealLinkFromHtml(contextSlice, baseOrigin, basePath);
     }
-    pushUnique(inner, inner, linkUrl);
+    pushUnique(inner, inner, linkUrl, contextText);
     if (out.length >= 55) break;
   }
 
@@ -242,11 +272,14 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
   for (const chunk of coarseBlocks) {
     if (out.length >= 50) break;
     const text = stripTags(chunk);
-    if (text.length < 35 || text.length > 900) continue;
-    if (!KEYWORD_RE.test(text)) continue;
-    const line = text.slice(0, 220);
+    if (text.length < 35) continue;
+    // Storefronts (e.g. Magento) wrap the whole homepage in one giant div — a 900-char cap
+    // skipped almost all real promos. Cap scan text for regex cost, not for matching.
+    const textCheck = text.length > 8000 ? text.slice(0, 8000) : text;
+    if (!DISCOUNT_SIGNAL_RE.test(textCheck)) continue;
+    const line = textCheck.slice(0, 220);
     const bestInBlock = extractBestDealLinkFromHtml(chunk, baseOrigin, basePath);
-    pushUnique(line, text, bestInBlock);
+    pushUnique(line, textCheck.slice(0, 520), bestInBlock);
   }
 
   return out.slice(0, 36);
