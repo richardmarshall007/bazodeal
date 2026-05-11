@@ -70,6 +70,12 @@ const googleDealsWebUrl = (query, gl) => {
 const finalPrice = d => +(+d.retail_price * (1 - +d.discount_pct / 100)).toFixed(2);
 const savings    = d => +(+d.retail_price - finalPrice(d)).toFixed(2);
 const fmt        = n => `TT$${Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+/** Vite env values are strings; accept common truthy spellings from hosts (e.g. Vercel). */
+const envFlagTrue = (v) => {
+  if (v == null || v === "") return false;
+  const s = String(v).trim().toLowerCase();
+  return s === "true" || s === "1" || s === "yes" || s === "on";
+};
 const isDealActive = (deal) => !deal.expires_at || new Date(deal.expires_at).getTime() >= new Date().setHours(0, 0, 0, 0);
 /** Calendar date in user's local TZ (YYYY-MM-DD) */
 const localDateKey = (iso) => {
@@ -1027,7 +1033,7 @@ export default function Bazodeal() {
     }
   };
 
-  const stripeCheckoutEnabled = import.meta.env.VITE_USE_STRIPE_CHECKOUT === "true";
+  const stripeCheckoutEnabled = envFlagTrue(import.meta.env.VITE_USE_STRIPE_CHECKOUT);
 
   const checkout = async () => {
     if (!currentUser) {
