@@ -1536,14 +1536,14 @@ export default function Bazodeal() {
             <div className="hero-lead-wrap" aria-label="Site tagline">
               <p className="hero-lead">{`Get Bazodee!! with our Big Daily Deals from Trinidad and Tobago's #1 DEAL SITE`}</p>
             </div>
-            {currentUser && profile ? (
+            {currentUser && profile && (
               <div className="hero-sourcer-wrap">
                 <div className="hero-sourcer" role="region" aria-label="Deal Sourcer">
                   <div className="hero-sourcer-copy">
-                    <div className="hero-sourcer-k">Merchants · Account feature</div>
+                    <div className="hero-sourcer-k">Merchants · Signed in</div>
                     <div className="hero-sourcer-t">Deal Sourcer — pull promos from your site or page</div>
                     <div className="hero-sourcer-t2">
-                      Paste your shop or Facebook preview URL, scan for deal-style wording, pick lines, add TT$ price and discount, and post under your Bazodeal account — no retyping the same copy.
+                      Paste your shop or promos page URL, scan for deal-style wording, pick lines, add TT$ price and discount, and post under your Bazodeal account — no retyping the same copy.
                     </div>
                   </div>
                   <button
@@ -1556,26 +1556,6 @@ export default function Bazodeal() {
                     }}
                   >
                     Open Deal Sourcer
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="hero-sourcer-wrap">
-                <div className="hero-sourcer" role="region" aria-label="Deal Sourcer signup">
-                  <div className="hero-sourcer-copy">
-                    <div className="hero-sourcer-k">Merchants · Free account required</div>
-                    <div className="hero-sourcer-t">Deal Sourcer imports promos from your website</div>
-                    <div className="hero-sourcer-t2">
-                      Join Bazodeal to scan a page you own for discounts, deals, and offers — then publish what you choose as your marketplace listings.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-pri btn-sm"
-                    style={{ alignSelf:"center", flexShrink:0 }}
-                    onClick={() => setAuth("register")}
-                  >
-                    Create free account
                   </button>
                 </div>
               </div>
