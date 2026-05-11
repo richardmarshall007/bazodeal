@@ -387,6 +387,9 @@ textarea.inp{resize:vertical;line-height:1.5}
 .sourcer-card-sn{font-size:12px;color:var(--text2);margin-top:6px;line-height:1.45}
 .sourcer-card-link{font-size:11px;margin-top:8px}
 .sourcer-card-link a{color:var(--gold);font-weight:700}
+.sourcer-thumb{width:76px;height:76px;border-radius:10px;overflow:hidden;border:1px solid var(--border2);background:var(--bg3);flex-shrink:0;align-self:flex-start}
+.sourcer-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.sourcer-thumb-ph{font-size:10px;color:var(--text3);padding:8px;text-align:center;line-height:1.3}
 .sourcer-draft-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
 @media(max-width:520px){.sourcer-draft-grid{grid-template-columns:1fr}}
 .sourcer-warn{font-size:13px;color:var(--gold);margin-bottom:14px;line-height:1.5;max-width:560px}
@@ -1305,10 +1308,12 @@ export default function Bazodeal() {
     for (const id of ids) {
       const dr = sourcerDrafts[id];
       const c = sourcerCandidates.find((x) => x.id === id);
+      const pulledImg = typeof c.imageUrl === "string" && c.imageUrl.trim() ? c.imageUrl.trim() : null;
       const pieces = [
         dr.title.trim(),
         c.snippet && c.snippet !== dr.title.trim() ? String(c.snippet) : null,
         c.linkUrl ? `Link: ${c.linkUrl}` : null,
+        pulledImg ? `Image (from page): ${pulledImg}` : null,
         sourcerSourceUrl ? `Imported from: ${sourcerSourceUrl}` : null,
       ].filter(Boolean);
       const payload = {
@@ -1323,8 +1328,8 @@ export default function Bazodeal() {
         stock: 99,
         expires_at: null,
         approved: true,
-        image_url: null,
-        image_urls: null,
+        image_url: pulledImg,
+        image_urls: pulledImg ? [pulledImg] : null,
       };
       const { error, strippedImage } = await persistDealInsert(payload);
       if (strippedImage) strippedAny = true;
@@ -1814,7 +1819,7 @@ export default function Bazodeal() {
             </button>
           </div>
           <p className="sourcer-hint">
-            Enter a public page that lists promotions in text (your site, landing page, or link-in-bio shop). Bazodeal scans for wording like&nbsp;
+            Enter a public page that lists promotions in text (your site, landing page, or link-in-bio shop). The scan also picks up <strong>images</strong> (Open Graph, Twitter card, then regular <strong>img</strong> URLs) and pairs them with promo rows <strong>in order</strong> — verify the thumbnail matches the deal before you post. Bazodeal scans for wording like&nbsp;
             <em>discount</em>, <em>deal</em>, <em>offer</em>, <em>sale</em>, <em>save</em>, <em>promo</em>, or&nbsp;
             <em>% off</em>. Tick the rows you want, add TT$ pricing, then publish — listings use your merchant name.&nbsp;
             Facebook and similar sites often block automated reads; try a publicly readable web page instead.
@@ -1863,6 +1868,13 @@ export default function Bazodeal() {
                           onChange={(e) => toggleSourcerRow(c, e.target.checked)}
                           aria-label={`Select: ${c.title.slice(0, 80)}`}
                         />
+                        {c.imageUrl ? (
+                          <div className="sourcer-thumb">
+                            <img src={c.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                          </div>
+                        ) : (
+                          <div className="sourcer-thumb sourcer-thumb-ph">No image matched</div>
+                        )}
                         <div style={{ flex:1, minWidth:0 }}>
                           <div className="sourcer-card-title">{c.title}</div>
                           {c.snippet && c.snippet !== c.title && (

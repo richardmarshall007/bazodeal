@@ -1,5 +1,5 @@
-// Fetches an HTML page (server-side) and returns candidate promo lines containing
-// keywords like discount, deal, offer. Authenticated users only.
+// Fetches an HTML page (server-side) and returns candidate promo lines (keywords: discount, deal, …)
+// plus image URLs (og:image, twitter:image, <img src>) paired to rows in order. Authenticated only.
 // Deploy: supabase functions deploy deal-sourcer-scan
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
@@ -26,7 +26,66 @@ function norm(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
-type Candidate = { id: string; title: string; snippet: string; linkUrl: string | null };
+type Candidate = {
+  id: string;
+  title: string;
+  snippet: string;
+  linkUrl: string | null;
+  imageUrl: string | null;
+};
+
+function resolveHref(href: string, baseOrigin: string, basePath: string): string | null {
+  const h = href.trim();
+  if (!h || h.startsWith("data:") || h.startsWith("javascript:") || h.startsWith("mailto:")) return null;
+  try {
+    const u = new URL(h, baseOrigin + basePath);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.href.split("#")[0];
+  } catch {
+    return null;
+  }
+}
+
+/** Collect likely product/hero images (og/twitter first, then <img src>). */
+function extractPageImages(html: string, baseOrigin: string, basePath: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const push = (raw: string | null | undefined) => {
+    if (!raw) return;
+    const u = resolveHref(raw, baseOrigin, basePath);
+    if (!u || seen.has(u)) return;
+    const low = u.toLowerCase();
+    if (low.includes("data:image")) return;
+    // skip common tracking / spacer patterns
+    if (/\b1x1\b|\bspacer\b|\bblank\b|\btracking\b|\bpixel\b/i.test(u)) return;
+    if (!/\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(u) && !/\/image\//i.test(u) && !/cdn/i.test(u)) {
+      // allow og URLs without extension
+      if (!low.includes("og") && !low.includes("image") && !low.includes("photo") && !low.includes("media")) return;
+    }
+    seen.add(u);
+    out.push(u);
+  };
+
+  const og =
+    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i.exec(html) ||
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i.exec(html);
+  if (og) push(og[1]);
+
+  const tw =
+    /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i.exec(html) ||
+    /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/i.exec(html);
+  if (tw) push(tw[1]);
+
+  const imgRe = /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = imgRe.exec(html)) !== null) {
+    push(m[1]);
+    if (out.length >= 40) break;
+  }
+
+  return out.slice(0, 24);
+}
 
 function extractCandidates(html: string, baseOrigin: string, basePath: string): Candidate[] {
   const out: Candidate[] = [];
@@ -47,6 +106,7 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
       title: displayTitle,
       snippet: snippet || displayTitle,
       linkUrl,
+      imageUrl: null,
     });
   };
 
@@ -86,6 +146,14 @@ function extractCandidates(html: string, baseOrigin: string, basePath: string): 
   }
 
   return out.slice(0, 36);
+}
+
+/** Best-effort: pair promo rows with page images in order (og/hero first, then document images). */
+function attachImagesToCandidates(candidates: Candidate[], pageImages: string[]) {
+  if (!pageImages.length) return;
+  for (let i = 0; i < candidates.length; i++) {
+    if (pageImages[i]) candidates[i].imageUrl = pageImages[i];
+  }
 }
 
 function assertSafeUrl(raw: string): URL {
@@ -216,7 +284,9 @@ Deno.serve(async (req) => {
   }
 
   const basePath = target.pathname.replace(/\/[^/]*$/, "/");
+  const pageImages = extractPageImages(html, target.origin, basePath || "/");
   const candidates = extractCandidates(html, target.origin, basePath || "/");
+  attachImagesToCandidates(candidates, pageImages);
   const warning =
     candidates.length === 0
       ? "No deal-style lines found (keywords: discount, deal, offer, sale, save, promo, % off). Many social sites block imports — try your public shop or blog URL, or a page that lists promotions in text."
