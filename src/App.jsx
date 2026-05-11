@@ -35,7 +35,7 @@ const formatEdgeInvokeError = (error) => {
     typeof ctx?.message === "string" ? ctx.message : "";
   if (name === "FunctionsFetchError") {
     const detail = ctxMsg ? ` (${ctxMsg})` : "";
-    return `Could not reach Supabase${detail}. Common fixes: (1) Deploy the function: supabase functions deploy deal-sourcer-scan (Dashboard → Edge Functions). (2) Allow *.supabase.co in ad blockers / privacy tools. (3) On Vercel, set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to this same project and redeploy.`;
+    return `Could not reach Supabase${detail}. Common fixes: (1) Deploy deal-sourcer-scan and redeploy the site so /api/deal-sourcer-scan (Vercel proxy) is live. (2) In Vercel → Settings → Environment Variables, add the same VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY the build uses (needed for the serverless proxy too). (3) Allow *.supabase.co in privacy tools if you rely on direct browser calls.`;
   }
   if (name === "FunctionsRelayError") {
     return `Supabase relay error${ctxMsg ? `: ${ctxMsg}` : ""}. Try again or check Edge Function logs in the dashboard.`;
@@ -1099,13 +1099,60 @@ export default function Bazodeal() {
         return;
       }
       const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const { data, error } = await supabase.functions.invoke("deal-sourcer-scan", {
-        body: { url: raw },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          ...(anonKey ? { apikey: anonKey } : {}),
-        },
-      });
+      const token = session.access_token;
+      const payload = { url: raw };
+      let data;
+      let error;
+      const invokeDirect = async () =>
+        supabase.functions.invoke("deal-sourcer-scan", {
+          body: payload,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(anonKey ? { apikey: anonKey } : {}),
+          },
+        });
+
+      ({ data, error } = await invokeDirect());
+
+      const proxyEnabled = envFlagTrue(import.meta.env.VITE_DEAL_SOURCER_PROXY ?? "true");
+      const fetchLikelyFailed =
+        error?.name === "FunctionsFetchError" ||
+        (error?.context instanceof Error && /failed\s+to\s+fetch/i.test(error.context.message));
+
+      if (error && proxyEnabled && typeof window !== "undefined" && fetchLikelyFailed) {
+        try {
+          const proxied = await fetch(`${window.location.origin}/api/deal-sourcer-scan`, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+              ...(anonKey ? { apikey: anonKey } : {}),
+            },
+            body: JSON.stringify(payload),
+          });
+          const text = await proxied.text();
+          let parsed = null;
+          try {
+            parsed = text ? JSON.parse(text) : null;
+          } catch {
+            parsed = { error: text ? text.slice(0, 320) : "Invalid response from /api/deal-sourcer-scan" };
+          }
+          data = parsed;
+          if (proxied.ok) {
+            error = null;
+          } else {
+            const reason =
+              parsed && typeof parsed.error === "string"
+                ? parsed.error
+                : `Proxy returned HTTP ${proxied.status}. Is deal-sourcer-scan deployed?`;
+            error = Object.assign(new Error(reason), { name: "FunctionsHttpError" });
+          }
+        } catch {
+          /* keep original error below */
+        }
+      }
+
       if (error) {
         const msg = formatEdgeInvokeError(error);
         setSourcerFetchErr(msg);

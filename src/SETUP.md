@@ -209,7 +209,15 @@ supabase functions deploy deal-sourcer-scan
 
 The **Deal Sourcer** UI calls `deal-sourcer-scan`: it fetches HTML server-side (so the browser avoids CORS blocks) and extracts lines that look like promotions. Authenticated users only; no extra secrets beyond the usual Edge Function env.
 
-**If the app says “Failed to send a request to the Edge Function”** (browser never got a response): that is almost always **not** your scan URL — it is the call from the site to `https://<project>.supabase.co/functions/v1/deal-sourcer-scan`. Fix by (1) deploying `deal-sourcer-scan` to the **same** Supabase project as `VITE_SUPABASE_URL`, (2) turning off ad blockers / strict privacy lists that block `*.supabase.co`, (3) confirming production env vars on Vercel match that project, then redeploying the frontend.
+**If the browser shows “Failed to fetch” when scanning:** the SPA could not complete a network call to Supabase’s host (extensions, flaky DNS, or strict `connect-src` CSP). Bazodeal now **automatically retries** via a **same-origin** proxy on deployments that ship `api/deal-sourcer-scan.js` (included for **Vercel**).
+
+For that proxy to run on Vercel you must:
+
+1. Deploy **`deal-sourcer-scan`** to Edge Functions (`supabase functions deploy deal-sourcer-scan`).
+2. In **Vercel → Project → Settings → Environment Variables**, set **`VITE_SUPABASE_URL`** and **`VITE_SUPABASE_ANON_KEY`** for **Production** (and Preview if you test there). The serverless proxy reads the same vars at runtime even though they begin with `VITE_`; without them `/api/deal-sourcer-scan` returns 500.
+3. Redeploy the frontend so Vercel picks up **`api/deal-sourcer-scan.js`**.
+
+Disable the proxy fallback with **`VITE_DEAL_SOURCER_PROXY=false`** if you troubleshoot only direct calls.
 
 In **Project Settings → Edge Functions → Secrets** (or via CLI), set:
 
