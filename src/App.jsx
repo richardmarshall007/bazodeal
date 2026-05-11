@@ -13,10 +13,33 @@ const YEARS      = Array.from({length:70},(_,i)=>(2006-i).toString());
 const GENDERS    = ["Male","Female","Non-binary","Prefer not to say"];
 const EMOJIS     = ["🛍️","📱","👗","🏠","⚽","💄","✈️","🍕","🧸","📚","🚗","💊","💍","🏕️","🎮","🐾","🎵","🍫","🏋️","🖥️"];
 const TODAY      = new Date().toISOString().split("T")[0];
+const MAX_DEAL_IMAGES = 8;
 
 const finalPrice = d => +(+d.retail_price * (1 - +d.discount_pct / 100)).toFixed(2);
 const savings    = d => +(+d.retail_price - finalPrice(d)).toFixed(2);
 const fmt        = n => `TT$${Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+
+/** All image URLs in gallery order (first = listing / hero cover). */
+const dealGallery = (deal) => {
+  if (!deal) return [];
+  let raw = deal.image_urls;
+  if (raw == null) raw = [];
+  if (typeof raw === "string") {
+    try {
+      const p = JSON.parse(raw);
+      raw = Array.isArray(p) ? p : [];
+    } catch {
+      raw = [];
+    }
+  }
+  const fromJson = Array.isArray(raw) ? raw.filter((u) => typeof u === "string" && u.trim()) : [];
+  if (fromJson.length) return [...new Set(fromJson)];
+  if (deal.image_url) return [deal.image_url];
+  return [];
+};
+
+const dealCoverUrl = (deal) => dealGallery(deal)[0] || null;
+
 /** Vite env values are strings; accept common truthy spellings from hosts (e.g. Vercel). */
 const envFlagTrue = (v) => {
   if (v == null || v === "") return false;
@@ -414,6 +437,25 @@ textarea.inp{resize:vertical;line-height:1.5}
 .notif.error{border-color:rgba(255,23,68,.3);background:rgba(255,23,68,.05)}
 .notif.info{border-color:rgba(255,208,0,.28);background:rgba(255,208,0,.07)}
 
+.grid-deal-card{cursor:pointer;outline:none}
+.grid-deal-card:focus-visible{box-shadow:0 0 0 2px var(--gold)}
+.deal-detail-overlay{position:fixed;inset:0;z-index:460;background:rgba(0,0,0,.82);backdrop-filter:blur(8px);display:flex;align-items:flex-start;justify-content:center;padding:20px 16px 32px;overflow-y:auto}
+.deal-detail-panel{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius-xl);width:100%;max-width:520px;margin-top:8px;box-shadow:0 24px 60px rgba(0,0,0,.75);position:relative}
+.deal-detail-close{position:absolute;top:12px;right:12px;width:40px;height:40px;border-radius:10px;border:1px solid var(--border2);background:var(--bg3);color:var(--text);font-size:22px;line-height:1;cursor:pointer;font-weight:700;z-index:2;display:flex;align-items:center;justify-content:center}
+.deal-detail-close:hover{border-color:var(--primary);color:var(--gold)}
+.deal-detail-head{padding:20px 48px 12px 18px;border-bottom:1px solid var(--border)}
+.deal-detail-head h2{font-family:'Bebas Neue';font-size:28px;letter-spacing:1px;line-height:1.1;color:var(--text)}
+.deal-detail-meta{font-size:12px;color:var(--text2);margin-top:8px;font-weight:700}
+.deal-detail-gallery{padding:14px 16px 8px;display:flex;flex-direction:column;gap:12px;max-height:min(52vh,420px);overflow-y:auto}
+.deal-detail-gallery img{width:100%;height:auto;display:block;border-radius:var(--radius-lg);border:1px solid var(--border);background:var(--bg3)}
+.deal-detail-body{padding:0 18px 18px}
+.deal-detail-actions{padding:14px 18px;display:flex;gap:10px;flex-wrap:wrap;border-top:1px solid var(--border)}
+.deal-img-strip{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;align-items:center}
+.deal-img-thumb{position:relative;width:72px;height:72px;border-radius:10px;overflow:hidden;border:1px solid var(--border2);background:var(--bg3);flex-shrink:0}
+.deal-img-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.deal-img-thumb-rm{position:absolute;top:2px;right:2px;width:22px;height:22px;border-radius:6px;border:none;background:rgba(8,7,10,.85);color:var(--text);font-size:14px;line-height:1;cursor:pointer;font-weight:800}
+.deal-img-add{font-size:12px;font-weight:700;color:var(--text2)}
+
 .cart-fab{position:relative}
 .cart-badge{position:absolute;top:-7px;right:-7px;background:var(--primary);color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center}
 .divider{height:1px;background:var(--border);margin:20px 0}
@@ -424,47 +466,68 @@ textarea.inp{resize:vertical;line-height:1.5}
 
 // ── DealForm — outside main component to prevent cursor-jump remounts ────────
 function DealForm({
-  dealF, setDealF, imagePreview, onImageChange, posting, onPost, title, btnLabel, btnClass,
+  dealF, setDealF, imagePreviews, onImagesChange, onRemoveImage, posting, onPost, title, btnLabel, btnClass,
 }) {
   const showPreview = dealF.retailPrice && dealF.discountPct && +dealF.retailPrice > 0 && +dealF.discountPct > 0;
+  const hasImages = imagePreviews.length > 0;
 
   return (
     <div className="deal-form">
       <h3>{title}</h3>
 
       <div className="fg">
-        <label>Deal Image</label>
-        <div className={`img-upload-area ${imagePreview ? "has-image" : ""}`}>
-          {imagePreview ? (
-            <>
-              <img src={imagePreview} alt="Preview" />
-              <button
-                className="img-change-btn"
-                onClick={e => { e.stopPropagation(); document.getElementById("deal-img-input").click(); }}
-              >Change</button>
-            </>
-          ) : (
-            <>
-              <div style={{ fontSize:28 }}>🖼️</div>
-              <div className="img-upload-label">Click to upload an image</div>
-              <div className="img-upload-hint">JPG, PNG or WEBP · Max 5MB</div>
-            </>
-          )}
-          <input
-            id="deal-img-input"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={onImageChange}
-            style={{ position:"absolute", inset:0, opacity:0, cursor:"pointer", width:"100%", height:"100%" }}
-          />
-        </div>
-      </div>
-
-      {imagePreview && (
-        <p style={{ fontSize:11, color:"var(--text3)", marginTop:-6, marginBottom:4 }}>
-          Full image is kept (landscape or portrait); sides or top/bottom may show padding on the card.
+        <label>Deal images</label>
+        <p style={{ fontSize:11, color:"var(--text3)", marginBottom:8 }}>
+          First image is the cover on listings; add more — shoppers see them when they open the deal and scroll.
         </p>
-      )}
+        {!hasImages ? (
+          <div className="img-upload-area">
+            <div style={{ fontSize:28 }}>🖼️</div>
+            <div className="img-upload-label">Click to upload (you can pick several)</div>
+            <div className="img-upload-hint">JPG, PNG or WEBP · Up to {MAX_DEAL_IMAGES} files · Max 5MB each</div>
+            <input
+              id="deal-img-input"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              onChange={onImagesChange}
+              style={{ position:"absolute", inset:0, opacity:0, cursor:"pointer", width:"100%", height:"100%" }}
+            />
+          </div>
+        ) : (
+          <div>
+            <div className="deal-img-strip">
+              {imagePreviews.map((src, i) => (
+                <div key={`${src}-${i}`} className="deal-img-thumb">
+                  <img src={src} alt={`Preview ${i + 1}`} />
+                  <button type="button" className="deal-img-thumb-rm" onClick={() => onRemoveImage(i)} aria-label={`Remove image ${i + 1}`}>×</button>
+                </div>
+              ))}
+              {imagePreviews.length < MAX_DEAL_IMAGES && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ alignSelf:"center" }}
+                  onClick={() => document.getElementById("deal-img-input-more")?.click()}
+                >
+                  + Add more
+                </button>
+              )}
+            </div>
+            <input
+              id="deal-img-input-more"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              onChange={onImagesChange}
+              style={{ display:"none" }}
+            />
+            <p style={{ fontSize:11, color:"var(--text3)", marginTop:8 }}>
+              Full images are letterboxed to fit. Order left-to-right: first = listing cover.
+            </p>
+          </div>
+        )}
+      </div>
 
       <div className="row2">
         <div className="fg">
@@ -571,8 +634,9 @@ export default function Bazodeal() {
   const [posting, setPosting]         = useState(false);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [adminActionId, setAdminActionId] = useState(null);
-  const [imageFile, setImageFile]     = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
+  const [imageDraftFiles, setImageDraftFiles] = useState([]);
+  const [imageDraftPreviews, setImageDraftPreviews] = useState([]);
+  const [dealDetail, setDealDetail] = useState(null);
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroCarouselPaused, setHeroCarouselPaused] = useState(false);
   const [radioStreamPlaying, setRadioStreamPlaying] = useState(false);
@@ -607,8 +671,9 @@ export default function Bazodeal() {
 
   const resetDealForm = () => {
     setDealF({ title:"", category:"Electronics", retailPrice:"", discountPct:"", emoji:"🛍️", description:"", stock:"", expires:"" });
-    setImageFile(null);
-    setImagePreview(null);
+    imageDraftPreviews.forEach((u) => { try { URL.revokeObjectURL(u); } catch { /* noop */ } });
+    setImageDraftFiles([]);
+    setImageDraftPreviews([]);
   };
 
   // ── Data Fetchers ────────────────────────────────────────
@@ -775,6 +840,15 @@ export default function Bazodeal() {
     return () => window.clearTimeout(t);
   }, [loading, view, currentUser]);
 
+  useEffect(() => {
+    if (!dealDetail) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setDealDetail(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dealDetail]);
+
   // Stripe return URLs: ?checkout=success | ?checkout=cancel
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -798,54 +872,90 @@ export default function Bazodeal() {
   }, [fetchCart, fetchDeals]);
 
   // ── Image Handling ───────────────────────────────────────
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { pop("Image must be under 5MB", "error"); return; }
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
-  };
-
-  const uploadImage = async () => {
-    if (!imageFile || !currentUser) return null;
-    let processedImageFile;
-    try {
-      processedImageFile = await fitPadImageFile(imageFile);
-    } catch (err) {
-      pop(err.message || "Could not process image.", "error");
-      return null;
-    }
-    const ext      = processedImageFile.name.split(".").pop();
-    const fileName = `${currentUser.id}/${Date.now()}.${ext}`;
-    try {
-      const uploadResult = await withTimeout(
-        supabase.storage.from("deal-images").upload(fileName, processedImageFile, { upsert: true }),
-        15000,
-        "Image upload timed out. Check Storage bucket policies and try again."
-      );
-      const { error } = uploadResult;
-      if (error) {
-        pop("Image upload failed: " + error.message, "error");
-        return null;
+  const handleDealImagesChange = (e) => {
+    const incoming = [...(e.target.files || [])];
+    e.target.value = "";
+    if (incoming.length === 0) return;
+    const nextFiles = [...imageDraftFiles];
+    for (const file of incoming) {
+      if (nextFiles.length >= MAX_DEAL_IMAGES) {
+        pop(`You can attach at most ${MAX_DEAL_IMAGES} images.`, "error");
+        break;
       }
-      const { data: { publicUrl } } = supabase.storage.from("deal-images").getPublicUrl(fileName);
-      return publicUrl;
-    } catch (err) {
-      pop(err.message || "Image upload failed unexpectedly.", "error");
-      return null;
+      if (file.size > 5 * 1024 * 1024) {
+        pop(`${file.name || "A file"} is over 5MB — skipped.`, "error");
+        continue;
+      }
+      nextFiles.push(file);
     }
+    if (nextFiles.length === imageDraftFiles.length) return;
+    imageDraftPreviews.forEach((u) => { try { URL.revokeObjectURL(u); } catch { /* noop */ } });
+    setImageDraftFiles(nextFiles);
+    setImageDraftPreviews(nextFiles.map((f) => URL.createObjectURL(f)));
   };
 
-  /** Insert one deal row; retries without image_url when the column/schema rejects it. */
+  const removeDealImageAt = (index) => {
+    const u = imageDraftPreviews[index];
+    if (u) try { URL.revokeObjectURL(u); } catch { /* noop */ }
+    setImageDraftFiles((f) => f.filter((_, i) => i !== index));
+    setImageDraftPreviews((p) => p.filter((_, i) => i !== index));
+  };
+
+  const uploadDealImagesToStorage = async (files) => {
+    if (!files.length || !currentUser) return [];
+    const urls = [];
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i];
+      let processedImageFile;
+      try {
+        processedImageFile = await fitPadImageFile(file);
+      } catch (err) {
+        pop(err.message || "Could not process image.", "error");
+        return [];
+      }
+      const ext = processedImageFile.name.split(".").pop();
+      const fileName = `${currentUser.id}/${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      try {
+        const uploadResult = await withTimeout(
+          supabase.storage.from("deal-images").upload(fileName, processedImageFile, { upsert: true }),
+          15000,
+          "Image upload timed out. Check Storage bucket policies and try again."
+        );
+        if (uploadResult.error) {
+          pop("Image upload failed: " + uploadResult.error.message, "error");
+          return [];
+        }
+        const { data: { publicUrl } } = supabase.storage.from("deal-images").getPublicUrl(fileName);
+        urls.push(publicUrl);
+      } catch (err) {
+        pop(err.message || "Image upload failed unexpectedly.", "error");
+        return [];
+      }
+    }
+    return urls;
+  };
+
+  /** Insert one deal row; retries with fewer image columns when the schema is older. */
   const persistDealInsert = async (payload) => {
-    let { error } = await supabase.from("deals").insert(payload);
+    let attempt = { ...payload };
+    let error;
     let strippedImage = false;
-    if (error?.message?.includes("image_url")) {
-      const { image_url, ...withoutImage } = payload;
-      void image_url;
-      const retry = await supabase.from("deals").insert(withoutImage);
-      error = retry.error ?? null;
-      strippedImage = !error;
+    for (let pass = 0; pass < 3; pass += 1) {
+      const res = await supabase.from("deals").insert(attempt);
+      error = res.error ?? null;
+      if (!error) return { error: null, strippedImage };
+      const msg = (error.message || "").toLowerCase();
+      if (pass === 0 && msg.includes("image_urls")) {
+        delete attempt.image_urls;
+        strippedImage = true;
+        continue;
+      }
+      if (pass === 1 && msg.includes("image_url")) {
+        delete attempt.image_url;
+        strippedImage = true;
+        continue;
+      }
+      break;
     }
     return { error, strippedImage };
   };
@@ -981,13 +1091,15 @@ export default function Bazodeal() {
     }
 
     setPosting(true);
-    const imageWasSelected = !!imageFile;
-    const imageUrl = await uploadImage();
-    if (imageWasSelected && !imageUrl) {
+    const imageWasSelected = imageDraftFiles.length > 0;
+    const uploadedUrls = imageWasSelected ? await uploadDealImagesToStorage(imageDraftFiles) : [];
+    if (imageWasSelected && uploadedUrls.length !== imageDraftFiles.length) {
       setPosting(false);
       pop("Image upload failed, so the deal was not posted. Fix upload settings and try again.", "error");
       return;
     }
+    const image_url = uploadedUrls[0] || null;
+    const image_urls = uploadedUrls.length > 0 ? uploadedUrls : null;
     const payload = {
       title,
       merchant_id:   currentUser.id,
@@ -999,7 +1111,8 @@ export default function Bazodeal() {
       stock:      parseInt(stock) || 99,
       expires_at: expires || null,
       approved:   true,
-      image_url:  imageUrl,
+      image_url,
+      image_urls,
     };
 
     const { error, strippedImage } = await persistDealInsert(payload);
@@ -1010,7 +1123,7 @@ export default function Bazodeal() {
       return;
     }
     if (strippedImage) {
-      pop("Deal posted without image. Add image_url column in Supabase to enable image uploads.", "error");
+      pop("Deal posted without images. Add image_url and image_urls columns in Supabase (see bazodeal_schema.sql).", "error");
     }
     await fetchDeals();
     resetDealForm();
@@ -1211,6 +1324,7 @@ export default function Bazodeal() {
         expires_at: null,
         approved: true,
         image_url: null,
+        image_urls: null,
       };
       const { error, strippedImage } = await persistDealInsert(payload);
       if (strippedImage) strippedAny = true;
@@ -1223,7 +1337,7 @@ export default function Bazodeal() {
     }
     setPosting(false);
     if (strippedAny) {
-      pop("Some deals posted without images — add image_url to your deals table to attach photos.", "error");
+      pop("Some deals posted without image columns — add image_url / image_urls in Supabase (see schema).", "error");
     }
     await fetchDeals();
     setSourcerSelected(new Set());
@@ -1363,12 +1477,15 @@ export default function Bazodeal() {
     };
   }, [loading]);
 
-  const DealCardImage = ({ deal }) => (
-    <div className="card-img">
-      {deal.image_url ? <img src={deal.image_url} alt={deal.title} /> : <span className="emoji-fallback">{deal.emoji}</span>}
-      <div className="disc-badge">{deal.discount_pct}%<small>OFF</small></div>
-    </div>
-  );
+  const DealCardImage = ({ deal }) => {
+    const cover = dealCoverUrl(deal);
+    return (
+      <div className="card-img">
+        {cover ? <img src={cover} alt={deal.title} /> : <span className="emoji-fallback">{deal.emoji}</span>}
+        <div className="disc-badge">{deal.discount_pct}%<small>OFF</small></div>
+      </div>
+    );
+  };
 
   // ── Loading screen ───────────────────────────────────────
   if (loading) return (
@@ -1541,8 +1658,8 @@ export default function Bazodeal() {
                               {localDateKey(deal.created_at) === todayLocalKey() && (
                                 <span className="hero-slide-today">Today</span>
                               )}
-                              {deal.image_url ? (
-                                <img src={deal.image_url} alt={deal.title} />
+                              {dealCoverUrl(deal) ? (
+                                <img src={dealCoverUrl(deal)} alt={deal.title} />
                               ) : (
                                 <span style={{ fontSize:96, opacity:0.92 }} aria-hidden="true">{deal.emoji}</span>
                               )}
@@ -1645,7 +1762,20 @@ export default function Bazodeal() {
                 <p>Check back soon or try a different category.</p>
               </div>
             ) : filteredDeals.map(deal => (
-              <div key={deal.id} className="card">
+              <div
+                key={deal.id}
+                className="card grid-deal-card"
+                role="button"
+                tabIndex={0}
+                aria-label={`Open details: ${deal.title}`}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setDealDetail(deal);
+                  }
+                }}
+                onClick={() => setDealDetail(deal)}
+              >
                 <DealCardImage deal={deal} />
                 <div className="card-body">
                   <div className="card-cat">{deal.category}</div>
@@ -1662,11 +1792,11 @@ export default function Bazodeal() {
                     <div className="stock-info">{deal.stock} left · {deal.expires_at ? `Expires ${deal.expires_at}` : "Limited time"}</div>
                   </div>
                 </div>
-                <div className="card-actions">
-                  <button className={`like-btn ${liked.has(deal.id) ? "liked" : ""}`} onClick={() => toggleLike(deal.id)}>
+                <div className="card-actions" onClick={(e) => e.stopPropagation()}>
+                  <button type="button" className={`like-btn ${liked.has(deal.id) ? "liked" : ""}`} onClick={() => toggleLike(deal.id)}>
                     {liked.has(deal.id) ? "❤️" : "🤍"} {deal.like_count}
                   </button>
-                  <button className="btn btn-pri btn-sm add-btn" onClick={() => addToCart(deal)}>+ Add to Cart</button>
+                  <button type="button" className="btn btn-pri btn-sm add-btn" onClick={() => addToCart(deal)}>+ Add to Cart</button>
                 </div>
               </div>
             ))}
@@ -1834,7 +1964,7 @@ export default function Bazodeal() {
               {cart.map(item => (
                 <div key={item.id} className="cart-item">
                   <div className="cart-emo">
-                    {item.deal.image_url ? <img src={item.deal.image_url} alt={item.deal.title} /> : item.deal.emoji}
+                    {dealCoverUrl(item.deal) ? <img src={dealCoverUrl(item.deal)} alt={item.deal.title} /> : item.deal.emoji}
                   </div>
                   <div className="cart-info">
                     <h3>{item.deal.title}</h3>
@@ -1894,8 +2024,9 @@ export default function Bazodeal() {
           <DealForm
             dealF={dealF}
             setDealF={setDealF}
-            imagePreview={imagePreview}
-            onImageChange={handleImageChange}
+            imagePreviews={imageDraftPreviews}
+            onImagesChange={handleDealImagesChange}
+            onRemoveImage={removeDealImageAt}
             posting={posting}
             onPost={postDeal}
             title="New Deal Details"
@@ -1908,7 +2039,7 @@ export default function Bazodeal() {
               <div style={{ padding:28, textAlign:"center", color:"var(--text2)", fontSize:14 }}>No deals submitted yet.</div>
             ) : deals.filter(d => d.merchant_id === currentUser.id).map(d => (
               <div key={d.id} className="admin-row">
-                <div className="admin-emo">{d.image_url ? <img src={d.image_url} alt={d.title} /> : d.emoji}</div>
+                <div className="admin-emo">{dealCoverUrl(d) ? <img src={dealCoverUrl(d)} alt={d.title} /> : d.emoji}</div>
                 <div className="admin-info">
                   <h4>{d.title}</h4>
                   <p>{fmt(d.retail_price)} → {fmt(finalPrice(d))} ({d.discount_pct}% OFF) · ❤️ {d.like_count}</p>
@@ -1937,8 +2068,9 @@ export default function Bazodeal() {
           <DealForm
             dealF={dealF}
             setDealF={setDealF}
-            imagePreview={imagePreview}
-            onImageChange={handleImageChange}
+            imagePreviews={imageDraftPreviews}
+            onImagesChange={handleDealImagesChange}
+            onRemoveImage={removeDealImageAt}
             posting={posting}
             onPost={postDeal}
             title="Upload Deal"
@@ -1952,7 +2084,7 @@ export default function Bazodeal() {
               <div style={{ padding:28, textAlign:"center", color:"var(--text2)", fontSize:14 }}>No deals yet.</div>
             ) : liveDeals.map(d => (
               <div key={d.id} className="admin-row">
-                <div className="admin-emo">{d.image_url ? <img src={d.image_url} alt={d.title} /> : d.emoji}</div>
+                <div className="admin-emo">{dealCoverUrl(d) ? <img src={dealCoverUrl(d)} alt={d.title} /> : d.emoji}</div>
                 <div className="admin-info">
                   <h4>{d.title}</h4>
                   <p>by {d.merchant_name} · {fmt(d.retail_price)} → {fmt(finalPrice(d))} ({d.discount_pct}% OFF) · ❤️ {d.like_count}</p>
@@ -1973,7 +2105,7 @@ export default function Bazodeal() {
               <div style={{ padding:28, textAlign:"center", color:"var(--text2)", fontSize:14 }}>No expired deals.</div>
             ) : expiredDeals.map(d => (
               <div key={d.id} className="admin-row">
-                <div className="admin-emo">{d.image_url ? <img src={d.image_url} alt={d.title} /> : d.emoji}</div>
+                <div className="admin-emo">{dealCoverUrl(d) ? <img src={dealCoverUrl(d)} alt={d.title} /> : d.emoji}</div>
                 <div className="admin-info">
                   <h4>{d.title}</h4>
                   <p>by {d.merchant_name} · {fmt(d.retail_price)} → {fmt(finalPrice(d))} ({d.discount_pct}% OFF) · ❤️ {d.like_count}</p>
@@ -2103,6 +2235,69 @@ export default function Bazodeal() {
               </button>
             </div>
             <div className="modal-switch">Already have an account? <button onClick={() => { setFormErr(""); setAuth("login"); }}>Sign In</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* Deal detail (grid click): gallery scroll + actions */}
+      {dealDetail && (
+        <div
+          className="deal-detail-overlay"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDealDetail(null);
+          }}
+        >
+          <div
+            className="deal-detail-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="deal-detail-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button type="button" className="deal-detail-close" onClick={() => setDealDetail(null)} aria-label="Close">
+              ×
+            </button>
+            <div className="deal-detail-head">
+              <h2 id="deal-detail-title">{dealDetail.title}</h2>
+              <div className="deal-detail-meta">
+                {dealDetail.category} · Posted by {dealDetail.merchant_name}
+              </div>
+            </div>
+            <div className="deal-detail-gallery">
+              {dealGallery(dealDetail).length === 0 ? (
+                <div style={{ textAlign:"center", padding:"24px 0" }}>
+                  <span style={{ fontSize:88, lineHeight:1 }} aria-hidden="true">{dealDetail.emoji}</span>
+                </div>
+              ) : (
+                dealGallery(dealDetail).map((url, i) => (
+                  <img key={`${url}-${i}`} src={url} alt={`${dealDetail.title} — photo ${i + 1}`} loading="lazy" />
+                ))
+              )}
+            </div>
+            <div className="deal-detail-body">
+              {dealDetail.description ? (
+                <p style={{ fontSize:14, color:"var(--text2)", lineHeight:1.55, whiteSpace:"pre-wrap" }}>{dealDetail.description}</p>
+              ) : null}
+              <div className="pricing" style={{ marginTop:16, borderTop:"1px solid var(--border)", paddingTop:14 }}>
+                <div className="retail-price">Was: {fmt(dealDetail.retail_price)}</div>
+                <div className="final-price">{fmt(finalPrice(dealDetail))}</div>
+                <div className="savings-tag">Save {fmt(savings(dealDetail))} · {dealDetail.discount_pct}% OFF</div>
+                <div className="stock-info">{dealDetail.stock} left · {dealDetail.expires_at ? `Expires ${dealDetail.expires_at}` : "Limited time"}</div>
+              </div>
+            </div>
+            <div className="deal-detail-actions">
+              <button
+                type="button"
+                className={`like-btn ${liked.has(dealDetail.id) ? "liked" : ""}`}
+                onClick={() => toggleLike(dealDetail.id)}
+              >
+                {liked.has(dealDetail.id) ? "❤️" : "🤍"} {dealDetail.like_count ?? 0}
+              </button>
+              <button type="button" className="btn btn-pri btn-sm add-btn" onClick={() => addToCart(dealDetail)}>
+                + Add to Cart
+              </button>
+            </div>
           </div>
         </div>
       )}

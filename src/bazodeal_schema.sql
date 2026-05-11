@@ -84,6 +84,10 @@ CREATE TABLE IF NOT EXISTS deals (
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Optional columns (existing projects): primary listing image + ordered gallery for detail lightbox
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'::jsonb;
+
 -- Likes (many-to-many users ↔ deals)
 CREATE TABLE IF NOT EXISTS likes (
   user_id    UUID REFERENCES profiles(id) ON DELETE CASCADE,
