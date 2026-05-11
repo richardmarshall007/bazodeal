@@ -64,10 +64,54 @@ const formatEdgeInvokeError = (error) => {
     return `Supabase relay error${ctxMsg ? `: ${ctxMsg}` : ""}. Try again or check Edge Function logs in the dashboard.`;
   }
   if (name === "FunctionsHttpError") {
-    return "The Edge Function returned a non-success HTTP status (for example 404 if the function name is missing, or 401 if the session expired). Deploy deal-sourcer-scan and sign in again if needed.";
+    const res = error.context;
+    // Proxy path uses a plain Error with only `message` set (no Response in context).
+    if (!(res instanceof Response) && typeof error.message === "string" && error.message.trim()) {
+      return error.message.trim();
+    }
+    const st = res && typeof res.status === "number" ? res.status : null;
+    return st
+      ? `The Edge Function returned HTTP ${st}. If no detail line appears below, deploy deal-sourcer-scan, confirm VITE_SUPABASE_URL matches that project, and sign in again.`
+      : "The Edge Function returned a non-success HTTP status. Deploy deal-sourcer-scan and sign in again if needed.";
   }
   return error.message || String(error);
 };
+
+/** Supabase puts the raw `Response` on `FunctionsHttpError.context`; read body for a useful message. */
+async function functionsHttpErrorUserMessage(error) {
+  if (!error || error.name !== "FunctionsHttpError") return "";
+  const res = error.context;
+  if (!(res instanceof Response)) return "";
+  const status = res.status;
+  let snippet = "";
+  try {
+    const text = await res.clone().text();
+    if (text) {
+      try {
+        const j = JSON.parse(text);
+        snippet =
+          (typeof j.error === "string" && j.error.trim()) ||
+          (typeof j.message === "string" && j.message.trim()) ||
+          (typeof j.msg === "string" && j.msg.trim()) ||
+          text.trim().slice(0, 280);
+      } catch {
+        snippet = text.trim().slice(0, 280);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const hint =
+    status === 401
+      ? " Try signing out and back in, or confirm this app’s Supabase URL/key is the same project as your account."
+      : status === 404
+        ? " Deploy: npx supabase functions deploy deal-sourcer-scan — function name must match exactly."
+        : status >= 500
+          ? " Check Supabase → Edge Functions → deal-sourcer-scan → Logs."
+          : "";
+  if (snippet) return `HTTP ${status}: ${snippet}${hint ? ` — ${hint}` : ""}`;
+  return `HTTP ${status}.${hint ? ` ${hint}` : ""} (Empty response body.)`;
+}
 const isDealActive = (deal) => !deal.expires_at || new Date(deal.expires_at).getTime() >= new Date().setHours(0, 0, 0, 0);
 /** Calendar date in user's local TZ (YYYY-MM-DD) */
 const localDateKey = (iso) => {
@@ -1235,7 +1279,11 @@ export default function Bazodeal() {
       }
 
       if (error) {
-        const msg = formatEdgeInvokeError(error);
+        let msg = formatEdgeInvokeError(error);
+        if (error.name === "FunctionsHttpError") {
+          const detail = await functionsHttpErrorUserMessage(error);
+          if (detail) msg = `Deal Sourcer — ${detail}`;
+        }
         setSourcerFetchErr(msg);
         pop(msg.length > 140 ? "Deal Sourcer could not reach Supabase — see the red message below." : msg, "error");
         return;
