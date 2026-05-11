@@ -209,6 +209,8 @@ supabase functions deploy deal-sourcer-scan
 
 The **Deal Sourcer** UI calls `deal-sourcer-scan`: it fetches HTML server-side (so the browser avoids CORS blocks) and extracts lines that look like promotions. Authenticated users only; no extra secrets beyond the usual Edge Function env.
 
+**If the app says “Failed to send a request to the Edge Function”** (browser never got a response): that is almost always **not** your scan URL — it is the call from the site to `https://<project>.supabase.co/functions/v1/deal-sourcer-scan`. Fix by (1) deploying `deal-sourcer-scan` to the **same** Supabase project as `VITE_SUPABASE_URL`, (2) turning off ad blockers / strict privacy lists that block `*.supabase.co`, (3) confirming production env vars on Vercel match that project, then redeploying the frontend.
+
 In **Project Settings → Edge Functions → Secrets** (or via CLI), set:
 
 | Secret | Purpose |

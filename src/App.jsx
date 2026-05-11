@@ -23,6 +23,28 @@ const envFlagTrue = (v) => {
   const s = String(v).trim().toLowerCase();
   return s === "true" || s === "1" || s === "yes" || s === "on";
 };
+
+/** Supabase `functions.invoke` wraps network vs HTTP failures — surface useful text. */
+const formatEdgeInvokeError = (error) => {
+  if (!error) return "Unknown error.";
+  const name = error.name || "";
+  const ctx = error.context;
+  const ctxMsg =
+    ctx instanceof Error ? (ctx.message || String(ctx)) :
+    typeof ctx === "string" ? ctx :
+    typeof ctx?.message === "string" ? ctx.message : "";
+  if (name === "FunctionsFetchError") {
+    const detail = ctxMsg ? ` (${ctxMsg})` : "";
+    return `Could not reach Supabase${detail}. Common fixes: (1) Deploy the function: supabase functions deploy deal-sourcer-scan (Dashboard → Edge Functions). (2) Allow *.supabase.co in ad blockers / privacy tools. (3) On Vercel, set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to this same project and redeploy.`;
+  }
+  if (name === "FunctionsRelayError") {
+    return `Supabase relay error${ctxMsg ? `: ${ctxMsg}` : ""}. Try again or check Edge Function logs in the dashboard.`;
+  }
+  if (name === "FunctionsHttpError") {
+    return "The Edge Function returned a non-success HTTP status (for example 404 if the function name is missing, or 401 if the session expired). Deploy deal-sourcer-scan and sign in again if needed.";
+  }
+  return error.message || String(error);
+};
 const isDealActive = (deal) => !deal.expires_at || new Date(deal.expires_at).getTime() >= new Date().setHours(0, 0, 0, 0);
 /** Calendar date in user's local TZ (YYYY-MM-DD) */
 const localDateKey = (iso) => {
@@ -343,7 +365,7 @@ textarea.inp{resize:vertical;line-height:1.5}
 .sourcer-draft-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
 @media(max-width:520px){.sourcer-draft-grid{grid-template-columns:1fr}}
 .sourcer-warn{font-size:13px;color:var(--gold);margin-bottom:14px;line-height:1.5;max-width:560px}
-.sourcer-err{font-size:13px;color:var(--red);margin-bottom:14px;font-weight:600;line-height:1.45}
+.sourcer-err{font-size:13px;color:var(--red);margin-bottom:14px;font-weight:600;line-height:1.45;white-space:pre-wrap;max-width:min(720px,100%)}
 .hero-sourcer-wrap{width:100%;max-width:min(620px,94vw);margin:0 auto 22px;padding:0 16px}
 .hero-sourcer{background:linear-gradient(145deg,var(--bg3),var(--card));border:1px solid var(--border2);border-radius:var(--radius-xl);padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;box-shadow:0 10px 36px rgba(0,0,0,.28)}
 .hero-sourcer-copy{flex:1;min-width:min(100%,220px)}
@@ -1076,15 +1098,18 @@ export default function Bazodeal() {
         pop("Please sign in again.", "error");
         return;
       }
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       const { data, error } = await supabase.functions.invoke("deal-sourcer-scan", {
         body: { url: raw },
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          ...(anonKey ? { apikey: anonKey } : {}),
+        },
       });
       if (error) {
-        pop(
-          error.message || "Scan failed. Deploy the deal-sourcer-scan Edge Function in Supabase (see repo).",
-          "error",
-        );
+        const msg = formatEdgeInvokeError(error);
+        setSourcerFetchErr(msg);
+        pop(msg.length > 140 ? "Deal Sourcer could not reach Supabase — see the red message below." : msg, "error");
         return;
       }
       if (data?.error) {
