@@ -452,12 +452,12 @@ textarea.inp{resize:vertical;line-height:1.5}
 @media(max-width:520px){.sourcer-draft-grid{grid-template-columns:1fr}}
 .sourcer-warn{font-size:13px;color:var(--gold);margin-bottom:14px;line-height:1.5;max-width:560px}
 .sourcer-err{font-size:13px;color:var(--red);margin-bottom:14px;font-weight:600;line-height:1.45;white-space:pre-wrap;max-width:min(720px,100%)}
-.hero-sourcer-wrap{width:100%;max-width:min(620px,94vw);margin:0 auto 22px;padding:0 16px}
-.hero-sourcer{background:linear-gradient(145deg,var(--bg3),var(--card));border:1px solid var(--border2);border-radius:var(--radius-xl);padding:16px 18px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;box-shadow:0 10px 36px rgba(0,0,0,.28)}
-.hero-sourcer-copy{flex:1;min-width:min(100%,220px)}
-.hero-sourcer-k{font-size:10px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:1.6px}
-.hero-sourcer-t{font-size:clamp(15px,2.4vw,17px);font-weight:800;color:var(--text);line-height:1.35;margin-top:5px}
-.hero-sourcer-t2{font-size:12px;color:var(--text2);margin-top:7px;line-height:1.45;max-width:34em}
+.home-sourcer-cta{text-align:center;margin:0 auto 22px;padding:0 16px;max-width:min(640px,94vw)}
+.home-sourcer-cta .btn{margin-inline:4px}
+.home-sourcer-sub{font-size:12px;color:var(--text2);margin-top:10px;line-height:1.5;max-width:36em;margin-inline:auto}
+.admin-concurrent-tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px;width:100%;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border2)}
+.admin-concurrent-lbl{font-size:11px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.5px}
+.admin-concurrent-inp{width:72px;padding:6px 8px;font-size:13px}
 
 .dash{padding:36px 24px 60px;max-width:960px;margin:0 auto}
 .dash-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:28px;flex-wrap:wrap;gap:12px}
@@ -726,6 +726,8 @@ export default function Bazodeal() {
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [adminActionId, setAdminActionId] = useState(null);
   const [adminPostingAuthId, setAdminPostingAuthId] = useState(null);
+  const [adminConcurrentLimitId, setAdminConcurrentLimitId] = useState(null);
+  const [concurrentDrafts, setConcurrentDrafts] = useState({});
   const [theme, setTheme] = useState(() => {
     if (typeof window === "undefined") return "light";
     return window.localStorage.getItem("bazodeal-theme") === "dark" ? "dark" : "light";
@@ -867,6 +869,48 @@ export default function Bazodeal() {
       pop(nextValue ? "This member can post deals." : "Posting permission revoked.", "success");
     },
     [fetchAllUsers, fetchProfile, currentUser?.id, pop],
+  );
+
+  const setUserConcurrentLimit = useCallback(
+    async (userId) => {
+      const u = allUsers.find((x) => x.id === userId);
+      const raw =
+        concurrentDrafts[userId] !== undefined
+          ? concurrentDrafts[userId]
+          : String(Math.max(1, parseInt(String(u?.concurrent_deals_limit ?? 1), 10) || 1));
+      const parsed = parseInt(String(raw).trim(), 10);
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        pop("Enter a whole number from 1 to 99 for concurrent deals.", "error");
+        return;
+      }
+      const limit = Math.min(99, parsed);
+      const prev = Math.max(1, parseInt(String(u?.concurrent_deals_limit ?? 1), 10) || 1);
+      if (limit === prev) {
+        setConcurrentDrafts((d) => {
+          const next = { ...d };
+          delete next[userId];
+          return next;
+        });
+        pop("No change to save.", "info");
+        return;
+      }
+      setAdminConcurrentLimitId(userId);
+      const { error } = await supabase.from("profiles").update({ concurrent_deals_limit: limit }).eq("id", userId);
+      setAdminConcurrentLimitId(null);
+      if (error) {
+        pop("Could not update concurrent deals limit: " + error.message, "error");
+        return;
+      }
+      setConcurrentDrafts((d) => {
+        const next = { ...d };
+        delete next[userId];
+        return next;
+      });
+      await fetchAllUsers();
+      if (currentUser?.id === userId) await fetchProfile(userId);
+      pop(`Max concurrent live deals set to ${limit}.`, "success");
+    },
+    [allUsers, concurrentDrafts, fetchAllUsers, fetchProfile, currentUser?.id, pop],
   );
 
   // ── Bootstrap ────────────────────────────────────────────
@@ -1775,32 +1819,23 @@ export default function Bazodeal() {
         <>
           <div className="hero">
             <div className="hero-lead-wrap" aria-label="Site tagline">
-              <p className="hero-lead">{`Get Bazodee!! with our Big Daily Deals from Trinidad and Tobago's #1 DEAL SITE`}</p>
+              <p className="hero-lead">{`Get Bazodee!!! with our Big Daily Deals from Trinidad and Tobago's #1 DEAL SITE`}</p>
             </div>
-            {currentUser && profile && (
-              <div className="hero-sourcer-wrap">
-                <div className="hero-sourcer" role="region" aria-label="Deal Sourcer">
-                  <div className="hero-sourcer-copy">
-                    <div className="hero-sourcer-k">Merchants · Signed in</div>
-                    <div className="hero-sourcer-t">Deal Sourcer — pull promos from your site or page</div>
-                    <div className="hero-sourcer-t2">
-                      Paste your shop or promos page URL, scan for deal-style wording, pick lines, add TT$ price and discount, and post under your Bazodeal account — no retyping the same copy.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-gold btn-sm"
-                    style={{ alignSelf:"center", flexShrink:0 }}
-                    onClick={() => {
-                      setView("sourcer");
-                      window.location.hash = "deal-sourcer";
-                    }}
-                  >
-                    Open Deal Sourcer
-                  </button>
-                </div>
-              </div>
-            )}
+            <div className="home-sourcer-cta">
+              <button
+                type="button"
+                className="btn btn-gold btn-sm"
+                onClick={() => {
+                  setView("sourcer");
+                  window.location.hash = "deal-sourcer";
+                }}
+              >
+                Open Deal Sourcer
+              </button>
+              <p className="home-sourcer-sub">
+                Scan a public promos page, pick lines, add TT$ prices, and publish under your merchant account. Sign in if prompted.
+              </p>
+            </div>
             {featuredSlides.length > 0 ? (
               <div
                 className="hero-carousel hero-carousel-hoverzone"
@@ -1969,7 +2004,16 @@ export default function Bazodeal() {
         <div className="page">
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12, marginBottom:8 }}>
             <h1 className="page-title" style={{ margin:0 }}>Deal Sourcer</h1>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setView("home")}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setView("home");
+                if (window.location.hash === "#deal-sourcer") {
+                  window.history.replaceState(null, "", window.location.pathname + window.location.search);
+                }
+              }}
+            >
               ← Back to deals
             </button>
           </div>
@@ -2246,7 +2290,7 @@ export default function Bazodeal() {
 
           <h3 className="admin-list-title">Who can post deals</h3>
           <p className="admin-members-hint">
-            New accounts cannot post until you <strong>Allow posting</strong> here. Admins can always post. Use <strong>Revoke</strong> if someone misuses the site.
+            New accounts cannot post until you <strong>Allow posting</strong> here. Admins can always post (no concurrent cap in the app). For other members, set <strong>max concurrent live deals</strong> so they can run more than one approved, non-expired listing at a time when allowed.
           </p>
           <div className="admin-list admin-list-members">
             {allUsers.length === 0 ? (
@@ -2288,6 +2332,33 @@ export default function Bazodeal() {
                         >
                           {adminPostingAuthId === u.id ? "…" : u.can_post_deals ? "Revoke posting" : "Allow posting"}
                         </button>
+                        <div className="admin-concurrent-tools">
+                          <span className="admin-concurrent-lbl">Max concurrent live deals</span>
+                          <input
+                            className="inp admin-concurrent-inp"
+                            type="number"
+                            min={1}
+                            max={99}
+                            step={1}
+                            aria-label={`Concurrent deal limit for ${u.name || "member"}`}
+                            value={
+                              concurrentDrafts[u.id] !== undefined
+                                ? concurrentDrafts[u.id]
+                                : String(Math.max(1, parseInt(String(u.concurrent_deals_limit ?? 1), 10) || 1))
+                            }
+                            onChange={(e) =>
+                              setConcurrentDrafts((d) => ({ ...d, [u.id]: e.target.value }))
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={adminConcurrentLimitId === u.id}
+                            onClick={() => void setUserConcurrentLimit(u.id)}
+                          >
+                            {adminConcurrentLimitId === u.id ? "…" : "Save limit"}
+                          </button>
+                        </div>
                       </>
                     )}
                   </div>
