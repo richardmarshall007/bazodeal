@@ -973,14 +973,28 @@ export default function Bazodeal() {
     return () => { subscription.unsubscribe(); };
   }, [fetchDeals, fetchProfile, fetchCart, fetchLikes, fetchAllUsers, ensureProfile]);
 
+  // Strip Chromium "scroll to text fragment" links (#:~:text=...) — they look broken in the bar and jump the page.
+  const stripTextFragmentHash = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const h = window.location.hash;
+    if (h && h.includes(":~:text")) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    stripTextFragmentHash();
+  }, [stripTextFragmentHash]);
+
   // Deep link for production: www.bazodeal.com/#deal-sourcer
   useEffect(() => {
     const onHash = () => {
+      stripTextFragmentHash();
       if (window.location.hash.replace(/^#/, "") === "deal-sourcer") setView("sourcer");
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, []);
+  }, [stripTextFragmentHash]);
 
   useEffect(() => {
     if (view !== "sourcer" && window.location.hash === "#deal-sourcer") {
@@ -1821,21 +1835,23 @@ export default function Bazodeal() {
             <div className="hero-lead-wrap" aria-label="Site tagline">
               <p className="hero-lead">{`Get Bazodee!!! with our Big Daily Deals from Trinidad and Tobago's #1 DEAL SITE`}</p>
             </div>
-            <div className="home-sourcer-cta">
-              <button
-                type="button"
-                className="btn btn-gold btn-sm"
-                onClick={() => {
-                  setView("sourcer");
-                  window.location.hash = "deal-sourcer";
-                }}
-              >
-                Open Deal Sourcer
-              </button>
-              <p className="home-sourcer-sub">
-                Scan a public promos page, pick lines, add TT$ prices, and publish under your merchant account. Sign in if prompted.
-              </p>
-            </div>
+            {currentUser && profile && (
+              <div className="home-sourcer-cta">
+                <button
+                  type="button"
+                  className="btn btn-gold btn-sm"
+                  onClick={() => {
+                    setView("sourcer");
+                    window.location.hash = "deal-sourcer";
+                  }}
+                >
+                  Open Deal Sourcer
+                </button>
+                <p className="home-sourcer-sub">
+                  Scan a public promos page, pick lines, add TT$ prices, and publish under your merchant account.
+                </p>
+              </div>
+            )}
             {featuredSlides.length > 0 ? (
               <div
                 className="hero-carousel hero-carousel-hoverzone"
