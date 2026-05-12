@@ -1,7 +1,7 @@
 // src/App.jsx — Bazodeal (Supabase edition, final)
 // npm install @supabase/supabase-js
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import { supabase } from "./lib/supabaseClient";
 import bazodealLogo from "./assets/bazodeal-logo.png";
 
@@ -18,6 +18,18 @@ const MAX_DEAL_IMAGES = 8;
 const finalPrice = d => +(+d.retail_price * (1 - +d.discount_pct / 100)).toFixed(2);
 const savings    = d => +(+d.retail_price - finalPrice(d)).toFixed(2);
 const fmt        = n => `TT$${Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+
+/** Discount % for DB from retail + deal (sale) price; null if invalid. */
+const discountPctFromRetailSale = (retailStr, saleStr) => {
+  const retail = parseFloat(String(retailStr ?? "").replace(/,/g, ""));
+  const sale = parseFloat(String(saleStr ?? "").replace(/,/g, ""));
+  if (!Number.isFinite(retail) || retail <= 0) return null;
+  if (!Number.isFinite(sale) || sale <= 0) return null;
+  if (sale >= retail) return null;
+  const pct = (1 - sale / retail) * 100;
+  if (pct <= 0 || pct >= 100) return null;
+  return Math.round(pct * 100) / 100;
+};
 
 /** All image URLs in gallery order (first = listing / hero cover). */
 const dealGallery = (deal) => {
@@ -338,6 +350,8 @@ body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden}
 .disc-badge{position:absolute;top:10px;right:10px;background:linear-gradient(145deg,var(--flame-yellow),var(--flame-orange));color:#08070A;font-family:'Bebas Neue';font-size:26px;letter-spacing:1px;padding:3px 10px 1px;border-radius:8px;line-height:1.1;text-align:center;z-index:2;box-shadow:0 4px 14px rgba(255,61,0,.35);pointer-events:none;transition:transform .32s cubic-bezier(0.34,1.45,0.64,1)}
 .grid .card:hover .disc-badge{transform:scale(1.06) translateZ(0)}
 .disc-badge small{display:block;font-family:'Nunito Sans';font-size:9px;font-weight:800;letter-spacing:1px;margin-top:-2px;opacity:.9}
+.deal-img-logo-mark{position:absolute;bottom:8px;right:10px;width:clamp(26px,7vw,38px);height:auto;max-height:40px;object-fit:contain;pointer-events:none;z-index:2;opacity:.94;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
+html[data-theme="light"] .deal-img-logo-mark{filter:drop-shadow(0 1px 2px rgba(0,0,0,.22))}
 .card-body{padding:14px;flex:1;display:flex;flex-direction:column;gap:6px}
 .card-cat{font-size:10px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:1.5px}
 .card-title{font-size:15px;font-weight:800;color:var(--text);line-height:1.3}
@@ -468,6 +482,10 @@ textarea.inp{resize:vertical;line-height:1.5}
 .badge-pend{background:var(--gold-bg);color:var(--gold);border:1px solid rgba(255,184,0,.2)}
 .badge-admin{background:rgba(255,61,0,.12);color:var(--primary);border:1px solid rgba(255,61,0,.25)}
 .admin-actions{display:flex;gap:6px;flex-shrink:0}
+.admin-list-members{overflow:visible}
+.admin-row-members{flex-wrap:wrap;align-items:flex-start}
+.admin-row-members .admin-actions{width:100%;display:flex;flex-direction:row;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px;padding-top:10px;margin-top:4px;border-top:1px solid var(--border)}
+.admin-members-hint{font-size:13px;color:var(--text2);line-height:1.45;margin:-8px 0 14px;max-width:720px}
 
 .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--primary),#ff5722);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;cursor:pointer;transition:transform .18s;flex-shrink:0}
 .avatar:hover{transform:scale(1.08)}
@@ -509,13 +527,39 @@ textarea.inp{resize:vertical;line-height:1.5}
 .spin{display:inline-block;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:60vh;gap:16px;color:var(--text2);font-size:14px}
+
+html[data-theme="light"]{
+  --bg:#ffffff;--bg2:#f7f7f9;--bg3:#ececf2;--card:#ffffff;
+  --border:#e2e0ea;--border2:#d4d0de;
+  --pri-dim:rgba(255,61,0,.1);
+  --green-bg:rgba(0,230,118,.1);
+  --red-bg:rgba(255,23,68,.08);
+  --text:#14121a;--text2:#4f4b5c;--text3:#7a7588;
+}
+html[data-theme="light"] .hdr{background:rgba(255,255,255,.94);border-bottom-color:rgba(255,61,0,.25);box-shadow:0 1px 0 rgba(255,208,0,.2)}
+html[data-theme="light"] .hero-carousel-nav{background:rgba(255,255,255,.95);color:var(--text)}
+html[data-theme="light"] .hero-merchant-name{text-shadow:none}
+html[data-theme="light"] .dropdown{box-shadow:0 16px 40px rgba(0,0,0,.12)}
+html[data-theme="light"] .deal-detail-overlay{background:rgba(20,18,26,.45)}
+html[data-theme="light"] .deal-detail-panel{box-shadow:0 24px 48px rgba(0,0,0,.12)}
+html[data-theme="light"] .grid .card:hover{box-shadow:0 20px 40px rgba(0,0,0,.1),0 0 0 1px rgba(255,61,0,.12)}
+html[data-theme="light"] .disc-badge{box-shadow:0 4px 12px rgba(255,61,0,.25)}
+html[data-theme="light"] .img-change-btn,
+html[data-theme="light"] .deal-img-thumb-rm{background:rgba(255,255,255,.92);color:var(--text)}
+html[data-theme="light"] .notif{box-shadow:0 8px 28px rgba(0,0,0,.12)}
+html[data-theme="light"] .notif.success{background:rgba(0,230,118,.08)}
+html[data-theme="light"] .notif.error{background:rgba(255,23,68,.06)}
+html[data-theme="light"] .notif.info{background:rgba(255,208,0,.1)}
+
+.posting-gate{margin:0 0 20px;padding:14px 16px;border-radius:var(--radius-lg);border:1px solid rgba(255,184,0,.35);background:var(--gold-bg);color:var(--text);font-size:14px;line-height:1.45;font-weight:700}
 `;
 
 // ── DealForm — outside main component to prevent cursor-jump remounts ────────
 function DealForm({
   dealF, setDealF, imagePreviews, onImagesChange, onRemoveImage, posting, onPost, title, btnLabel, btnClass,
 }) {
-  const showPreview = dealF.retailPrice && dealF.discountPct && +dealF.retailPrice > 0 && +dealF.discountPct > 0;
+  const previewPct = discountPctFromRetailSale(dealF.retailPrice, dealF.salePrice);
+  const showPreview = previewPct != null;
   const hasImages = imagePreviews.length > 0;
 
   return (
@@ -598,19 +642,19 @@ function DealForm({
             onChange={e => setDealF(p => ({ ...p, retailPrice: e.target.value }))} />
         </div>
         <div className="fg">
-          <label>Discount % *</label>
-          <input className="inp" type="number" min="1" max="99" placeholder="e.g. 40" value={dealF.discountPct}
-            onChange={e => setDealF(p => ({ ...p, discountPct: e.target.value }))} />
+          <label>Deal price (TT$) *</label>
+          <input className="inp" type="number" min="0" step="0.01" placeholder="Sale price" value={dealF.salePrice}
+            onChange={e => setDealF(p => ({ ...p, salePrice: e.target.value }))} />
         </div>
       </div>
 
       {showPreview && (
         <div className="price-preview">
-          <span>Deal price:</span>
-          <strong>{fmt(+dealF.retailPrice * (1 - +dealF.discountPct / 100))}</strong>
-          <span style={{ color:"var(--text3)" }}>({dealF.discountPct}% off {fmt(+dealF.retailPrice)})</span>
+          <span>Discount:</span>
+          <strong>{previewPct}%</strong>
+          <span style={{ color:"var(--text3)" }}>(deal {fmt(+dealF.salePrice)} · was {fmt(+dealF.retailPrice)})</span>
           <span style={{ marginLeft:"auto", color:"var(--primary)", fontWeight:800 }}>
-            Save {fmt(+dealF.retailPrice * +dealF.discountPct / 100)}
+            Save {fmt(+dealF.retailPrice - +dealF.salePrice)}
           </span>
         </div>
       )}
@@ -681,6 +725,11 @@ export default function Bazodeal() {
   const [posting, setPosting]         = useState(false);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [adminActionId, setAdminActionId] = useState(null);
+  const [adminPostingAuthId, setAdminPostingAuthId] = useState(null);
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === "undefined") return "light";
+    return window.localStorage.getItem("bazodeal-theme") === "dark" ? "dark" : "light";
+  });
   const [imageDraftFiles, setImageDraftFiles] = useState([]);
   const [imageDraftPreviews, setImageDraftPreviews] = useState([]);
   const [dealDetail, setDealDetail] = useState(null);
@@ -690,7 +739,7 @@ export default function Bazodeal() {
   const radioAudioRef = useRef(null);
   const [loginF, setLoginF] = useState({ email:"", password:"" });
   const [regF,   setRegF]   = useState({ email:"", password:"", name:"", phone:"", dobMonth:"", dobYear:"", gender:"", interests:[] });
-  const [dealF,  setDealF]  = useState({ title:"", category:"Electronics", retailPrice:"", discountPct:"", emoji:"🛍️", description:"", stock:"", expires:"" });
+  const [dealF,  setDealF]  = useState({ title:"", category:"Electronics", retailPrice:"", salePrice:"", emoji:"🛍️", description:"", stock:"", expires:"" });
 
   // ── Helpers ──────────────────────────────────────────────
   const pop = (msg, type = "success") => {
@@ -717,7 +766,7 @@ export default function Bazodeal() {
   };
 
   const resetDealForm = () => {
-    setDealF({ title:"", category:"Electronics", retailPrice:"", discountPct:"", emoji:"🛍️", description:"", stock:"", expires:"" });
+    setDealF({ title:"", category:"Electronics", retailPrice:"", salePrice:"", emoji:"🛍️", description:"", stock:"", expires:"" });
     imageDraftPreviews.forEach((u) => { try { URL.revokeObjectURL(u); } catch { /* noop */ } });
     setImageDraftFiles([]);
     setImageDraftPreviews([]);
@@ -796,6 +845,29 @@ export default function Bazodeal() {
       .order("created_at", { ascending: false });
     setAllUsers(data || []);
   }, []);
+
+  const canPostDeals = useMemo(
+    () => Boolean(profile?.role === "admin" || profile?.can_post_deals === true),
+    [profile],
+  );
+
+  const setUserCanPost = useCallback(
+    async (userId, nextValue) => {
+      setAdminPostingAuthId(userId);
+      const { error } = await supabase.from("profiles").update({ can_post_deals: nextValue }).eq("id", userId);
+      setAdminPostingAuthId(null);
+      if (error) {
+        pop("Could not update posting permission: " + error.message, "error");
+        return;
+      }
+      await fetchAllUsers();
+      if (currentUser?.id === userId) {
+        await fetchProfile(userId);
+      }
+      pop(nextValue ? "This member can post deals." : "Posting permission revoked.", "success");
+    },
+    [fetchAllUsers, fetchProfile, currentUser?.id, pop],
+  );
 
   // ── Bootstrap ────────────────────────────────────────────
   useEffect(() => {
@@ -917,6 +989,13 @@ export default function Bazodeal() {
     }, 0);
     return () => window.clearTimeout(t);
   }, [fetchCart, fetchDeals]);
+
+  useLayoutEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem("bazodeal-theme", theme);
+    } catch { /* noop */ }
+  }, [theme]);
 
   // ── Image Handling ───────────────────────────────────────
   const handleDealImagesChange = (e) => {
@@ -1110,8 +1189,17 @@ export default function Bazodeal() {
   };
 
   const postDeal = async () => {
-    const { title, retailPrice, discountPct, description, stock, expires, emoji, category } = dealF;
-    if (!title || !retailPrice || !discountPct) { pop("Title, price and discount are required", "error"); return; }
+    const { title, retailPrice, salePrice, description, stock, expires, emoji, category } = dealF;
+    const computedPct = discountPctFromRetailSale(retailPrice, salePrice);
+    if (!title || !retailPrice || !salePrice) { pop("Title, retail price, and deal price are required.", "error"); return; }
+    if (computedPct == null) {
+      pop("Deal price must be greater than zero and less than the retail price.", "error");
+      return;
+    }
+    if (!canPostDeals) {
+      pop("Your account is not approved to post deals yet. An admin must enable posting for your account first.", "error");
+      return;
+    }
     
     // Concurrency limit: non-admin merchants can only have up to `profiles.concurrent_deals_limit`
     // active deals at a time (active = approved + not expired).
@@ -1153,7 +1241,7 @@ export default function Bazodeal() {
       merchant_name: profile?.name || "Merchant",
       category, emoji,
       retail_price:  parseFloat(retailPrice),
-      discount_pct:  parseFloat(discountPct),
+      discount_pct:  computedPct,
       description,
       stock:      parseInt(stock) || 99,
       expires_at: expires || null,
@@ -1185,7 +1273,7 @@ export default function Bazodeal() {
         [c.id]: d[c.id] || {
           title: c.title,
           retailPrice: "",
-          discountPct: "",
+          salePrice: "",
           category: INTERESTS[0],
         },
       }));
@@ -1306,20 +1394,24 @@ export default function Bazodeal() {
 
   const postSelectedSourcerDeals = async () => {
     if (!currentUser || !profile) { setAuth("login"); return; }
+    if (!canPostDeals) {
+      pop("Your account is not approved to post deals yet. An admin must enable posting first.", "error");
+      return;
+    }
     const ids = [...sourcerSelected];
     if (ids.length === 0) { pop("Select at least one line to post.", "error"); return; }
 
     for (const id of ids) {
       const dr = sourcerDrafts[id];
       const c = sourcerCandidates.find((x) => x.id === id);
-      if (!c || !dr?.title?.trim() || dr.retailPrice === "" || dr.discountPct === "") {
-        pop("Each selected row needs a title, retail price, and discount %.", "error");
+      if (!c || !dr?.title?.trim() || dr.retailPrice === "" || dr.salePrice === "") {
+        pop("Each selected row needs a title, retail price, and deal price.", "error");
         return;
       }
       const rp = parseFloat(dr.retailPrice);
-      const dp = parseFloat(dr.discountPct);
-      if (!Number.isFinite(rp) || rp <= 0 || !Number.isFinite(dp) || dp <= 0 || dp >= 100) {
-        pop("Retail price must be greater than zero and discount must be between 1 and 99.", "error");
+      const pct = discountPctFromRetailSale(dr.retailPrice, dr.salePrice);
+      if (!Number.isFinite(rp) || rp <= 0 || pct == null) {
+        pop("Each row needs a valid retail price and a deal price below retail.", "error");
         return;
       }
     }
@@ -1371,7 +1463,7 @@ export default function Bazodeal() {
         category: dr.category || INTERESTS[0],
         emoji: "🛍️",
         retail_price: parseFloat(dr.retailPrice),
-        discount_pct: parseFloat(dr.discountPct),
+        discount_pct: discountPctFromRetailSale(dr.retailPrice, dr.salePrice),
         description: pieces.join("\n\n"),
         stock: 99,
         expires_at: null,
@@ -1536,6 +1628,7 @@ export default function Bazodeal() {
       <div className="card-img">
         {cover ? <img src={cover} alt={deal.title} /> : <span className="emoji-fallback">{deal.emoji}</span>}
         <div className="disc-badge">{deal.discount_pct}%<small>OFF</small></div>
+        <img src={bazodealLogo} alt="" className="deal-img-logo-mark" decoding="async" aria-hidden />
       </div>
     );
   };
@@ -1558,6 +1651,19 @@ export default function Bazodeal() {
       <header className="hdr">
         <div className="logo" onClick={() => setView("home")} role="button" tabIndex={0} onKeyDown={e => e.key === "Enter" && setView("home")}><img src={bazodealLogo} alt="Bazodeal" decoding="async" /></div>
         <nav className="nav">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={theme === "dark" ? "Light mode" : "Dark mode"}
+            aria-pressed={theme === "light"}
+            onClick={(e) => {
+              e.stopPropagation();
+              setTheme((t) => (t === "dark" ? "light" : "dark"));
+            }}
+          >
+            {theme === "dark" ? "☀️ Light" : "🌙 Dark"}
+          </button>
           <div className="radio-nav-wrap">
             {RADIO_STREAM_URL ? (
               <>
@@ -1717,6 +1823,7 @@ export default function Bazodeal() {
                                 <span style={{ fontSize:96, opacity:0.92 }} aria-hidden="true">{deal.emoji}</span>
                               )}
                               <div className="disc-badge">{deal.discount_pct}%<small>OFF</small></div>
+                              <img src={bazodealLogo} alt="" className="deal-img-logo-mark" decoding="async" aria-hidden />
                             </div>
                             <div className="hero-spotlight-body">
                               <div className="hero-spotlight-k">{deal.category}</div>
@@ -1958,15 +2065,15 @@ export default function Bazodeal() {
                             />
                           </div>
                           <div className="fg" style={{ marginBottom:0 }}>
-                            <label>Discount %</label>
+                            <label>Deal price (TT$)</label>
                             <input
                               className="inp"
                               type="number"
-                              min="1"
-                              max="99"
-                              placeholder="e.g. 25"
-                              value={dr.discountPct}
-                              onChange={(e) => patchSourcerDraft(c.id, { discountPct: e.target.value })}
+                              min="0"
+                              step="0.01"
+                              placeholder="Sale price"
+                              value={dr.salePrice}
+                              onChange={(e) => patchSourcerDraft(c.id, { salePrice: e.target.value })}
                             />
                           </div>
                           <div className="fg" style={{ marginBottom:0, gridColumn:"1/-1" }}>
@@ -1986,10 +2093,15 @@ export default function Bazodeal() {
                 })}
               </div>
               <div className="sourcer-actions">
+                {!canPostDeals && (
+                  <p className="sourcer-note" style={{ marginBottom:10, width:"100%" }}>
+                    Your account is not approved to publish listings yet. Ask an admin to enable posting, or use the regular deal form once approved.
+                  </p>
+                )}
                 <button
                   type="button"
                   className="btn btn-gold btn-sm"
-                  disabled={posting || sourcerSelected.size === 0}
+                  disabled={posting || sourcerSelected.size === 0 || !canPostDeals}
                   onClick={() => postSelectedSourcerDeals()}
                 >
                   {posting ? "Posting…" : `Post selected (${sourcerSelected.size}) to Bazodeal`}
@@ -2081,18 +2193,25 @@ export default function Bazodeal() {
             <h1>🏪 {profile.role === "admin" ? "Deals Dashboard" : "Post a Deal"}</h1>
             <button className="btn btn-ghost btn-sm" onClick={() => setView("home")}>← Back</button>
           </div>
-          <DealForm
-            dealF={dealF}
-            setDealF={setDealF}
-            imagePreviews={imageDraftPreviews}
-            onImagesChange={handleDealImagesChange}
-            onRemoveImage={removeDealImageAt}
-            posting={posting}
-            onPost={postDeal}
-            title="New Deal Details"
-            btnLabel="Submit Deal 🔥"
-            btnClass="btn-pri"
-          />
+          {!canPostDeals ? (
+            <div className="posting-gate">
+              Posting is turned off for new accounts until an admin reviews and approves you. This helps keep Bazodeal free of spam and inappropriate listings.
+              You can still browse deals, save favourites, and use your cart. If you need access, contact support or message the site admin.
+            </div>
+          ) : (
+            <DealForm
+              dealF={dealF}
+              setDealF={setDealF}
+              imagePreviews={imageDraftPreviews}
+              onImagesChange={handleDealImagesChange}
+              onRemoveImage={removeDealImageAt}
+              posting={posting}
+              onPost={postDeal}
+              title="New Deal Details"
+              btnLabel="Submit Deal 🔥"
+              btnClass="btn-pri"
+            />
+          )}
           <h3 className="admin-list-title">My Submitted Deals</h3>
           <div className="admin-list">
             {deals.filter(d => d.merchant_id === currentUser.id).length === 0 ? (
@@ -2123,6 +2242,58 @@ export default function Bazodeal() {
             <div className="stat-card"><div className="stat-card-n">{liveDeals.length}</div><div className="stat-card-l">Live</div></div>
             <div className="stat-card"><div className="stat-card-n">{expiredDeals.length}</div><div className="stat-card-l">Expired</div></div>
             <div className="stat-card"><div className="stat-card-n">{allUsers.length}</div><div className="stat-card-l">Members</div></div>
+          </div>
+
+          <h3 className="admin-list-title">Who can post deals</h3>
+          <p className="admin-members-hint">
+            New accounts cannot post until you <strong>Allow posting</strong> here. Admins can always post. Use <strong>Revoke</strong> if someone misuses the site.
+          </p>
+          <div className="admin-list admin-list-members">
+            {allUsers.length === 0 ? (
+              <div style={{ padding:28, textAlign:"center", color:"var(--text2)", fontSize:14 }}>No members loaded yet. Open this panel again or check Supabase <code style={{ fontSize:12 }}>profiles_with_email</code> and RLS.</div>
+            ) : (
+              allUsers.map((u) => (
+                <div key={u.id} className="admin-row admin-row-members">
+                  <div className="avatar" style={{ cursor:"default" }}>{(u.name || "?")[0].toUpperCase()}</div>
+                  <div className="admin-info">
+                    <h4>
+                      {u.name}
+                      {u.role === "admin" && <span className="badge badge-admin" style={{ marginLeft:8 }}>Admin</span>}
+                    </h4>
+                    <p>
+                      {u.email}
+                      {u.gender ? ` · ${u.gender}` : ""}
+                      {u.dob_month ? ` · ${MONTHS.find(m => m.v === u.dob_month)?.l} ${u.dob_year}` : ""}
+                      {u.phone ? ` · ${u.phone}` : ""}
+                    </p>
+                  </div>
+                  {u.interests?.length > 0 && (
+                    <span style={{ fontSize:11, color:"var(--text3)", flexShrink:0 }}>
+                      ❤️ {u.interests.slice(0,3).join(", ")}{u.interests.length > 3 ? ` +${u.interests.length-3}` : ""}
+                    </span>
+                  )}
+                  <div className="admin-actions">
+                    {u.role === "admin" ? (
+                      <span className="badge badge-admin">Always can post</span>
+                    ) : (
+                      <>
+                        <span className={`badge ${u.can_post_deals ? "badge-live" : "badge-pend"}`}>
+                          {u.can_post_deals ? "Posting allowed" : "Posting locked"}
+                        </span>
+                        <button
+                          type="button"
+                          className={u.can_post_deals ? "btn btn-ghost btn-sm" : "btn btn-pri btn-sm"}
+                          disabled={adminPostingAuthId === u.id}
+                          onClick={() => void setUserCanPost(u.id, !u.can_post_deals)}
+                        >
+                          {adminPostingAuthId === u.id ? "…" : u.can_post_deals ? "Revoke posting" : "Allow posting"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
           <DealForm
@@ -2176,33 +2347,6 @@ export default function Bazodeal() {
                     {adminActionId === d.id ? "Working…" : "Remove"}
                   </button>
                 </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="divider" />
-          <h3 className="admin-list-title">Members ({allUsers.length})</h3>
-          <div className="admin-list">
-            {allUsers.map((u, i) => (
-              <div key={i} className="admin-row">
-                <div className="avatar" style={{ cursor:"default" }}>{u.name[0].toUpperCase()}</div>
-                <div className="admin-info">
-                  <h4>
-                    {u.name}
-                    {u.role === "admin" && <span className="badge badge-admin" style={{ marginLeft:8 }}>Admin</span>}
-                  </h4>
-                  <p>
-                    {u.email}
-                    {u.gender ? ` · ${u.gender}` : ""}
-                    {u.dob_month ? ` · ${MONTHS.find(m => m.v === u.dob_month)?.l} ${u.dob_year}` : ""}
-                    {u.phone ? ` · ${u.phone}` : ""}
-                  </p>
-                </div>
-                {u.interests?.length > 0 && (
-                  <span style={{ fontSize:11, color:"var(--text3)", flexShrink:0 }}>
-                    ❤️ {u.interests.slice(0,3).join(", ")}{u.interests.length > 3 ? ` +${u.interests.length-3}` : ""}
-                  </span>
-                )}
               </div>
             ))}
           </div>
