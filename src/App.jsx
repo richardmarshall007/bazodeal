@@ -43,6 +43,28 @@ const finalPrice = d => +(+d.retail_price * (1 - +d.discount_pct / 100)).toFixed
 const savings    = d => +(+d.retail_price - finalPrice(d)).toFixed(2);
 const fmt        = n => `TT$${Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 
+/** For `<input type="datetime-local" />` from ISO string */
+const toDatetimeLocalValue = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/** Short display for event start (and optional end) in local time */
+const formatEventRange = (startsAt, endsAt) => {
+  const s = new Date(startsAt);
+  if (Number.isNaN(s.getTime())) return "";
+  const opt = { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
+  let out = s.toLocaleString(undefined, opt);
+  if (endsAt) {
+    const e = new Date(endsAt);
+    if (!Number.isNaN(e.getTime())) out += ` → ${e.toLocaleString(undefined, opt)}`;
+  }
+  return out;
+};
+
 /** Discount % for DB from retail + deal (sale) price; null if invalid. */
 const discountPctFromRetailSale = (retailStr, saleStr) => {
   const retail = parseFloat(String(retailStr ?? "").replace(/,/g, ""));
@@ -576,6 +598,19 @@ html[data-theme="light"] .notif.error{background:rgba(255,23,68,.06)}
 html[data-theme="light"] .notif.info{background:rgba(255,208,0,.1)}
 
 .posting-gate{margin:0 0 20px;padding:14px 16px;border-radius:var(--radius-lg);border:1px solid rgba(255,184,0,.35);background:var(--gold-bg);color:var(--text);font-size:14px;line-height:1.45;font-weight:700}
+.events-page{max-width:820px;margin:0 auto;padding:28px 24px 60px}
+.events-page-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;margin-bottom:22px}
+.events-list{display:flex;flex-direction:column;gap:14px}
+.event-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;display:grid;grid-template-columns:1fr auto;gap:14px;align-items:start}
+.event-card-past{opacity:.78}
+.event-card-img{max-width:min(100%,280px);width:100%;border-radius:10px;border:1px solid var(--border2);display:block}
+.event-when{font-size:12px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.event-title{font-family:'Bebas Neue';font-size:26px;letter-spacing:1px;line-height:1.05;color:var(--text)}
+.event-venue{font-size:13px;color:var(--text2);margin-top:6px}
+.event-desc{font-size:14px;color:var(--text2);margin-top:10px;line-height:1.5;white-space:pre-wrap}
+.event-form{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:24px}
+.event-form h3{font-family:'Bebas Neue';font-size:24px;letter-spacing:1px;margin-bottom:12px}
+@media(max-width:700px){.event-card{grid-template-columns:1fr}}
 `;
 
 // ── DealForm — outside main component to prevent cursor-jump remounts ────────
@@ -721,15 +756,18 @@ function DealForm({
 
 // ── Main Component ────────────────────────────────────────────
 export default function Bazodeal() {
-  const [view, setView]               = useState(() =>
-    typeof window !== "undefined" && window.location.hash.replace(/^#/, "") === "deal-sourcer"
-      ? "sourcer"
-      : "home"
-  );
+  const [view, setView]               = useState(() => {
+    if (typeof window === "undefined") return "home";
+    const h = window.location.hash.replace(/^#/, "");
+    if (h === "deal-sourcer") return "sourcer";
+    if (h === "events") return "events";
+    return "home";
+  });
   const [auth, setAuth]               = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [profile, setProfile]         = useState(null);
   const [deals, setDeals]             = useState([]);
+  const [events, setEvents]           = useState([]);
   const [allUsers, setAllUsers]       = useState([]);
   const [cart, setCart]               = useState([]);
   const [liked, setLiked]             = useState(new Set());
@@ -766,6 +804,9 @@ export default function Bazodeal() {
   const [loginF, setLoginF] = useState({ email:"", password:"" });
   const [regF,   setRegF]   = useState({ email:"", password:"", name:"", phone:"", dobMonth:"", dobYear:"", gender:"", interests:[], whatsappOptIn: true });
   const [dealF,  setDealF]  = useState({ title:"", category:"Electronics", retailPrice:"", salePrice:"", emoji:"🛍️", description:"", stock:"", expires:"" });
+  const [eventF, setEventF] = useState({ title:"", description:"", venue:"", starts_at:"", ends_at:"", image_url:"" });
+  const [eventImageFile, setEventImageFile] = useState(null);
+  const [eventImagePreview, setEventImagePreview] = useState("");
   const [qrInviteMerchantId, setQrInviteMerchantId] = useState(() => readInitialJoinMerchantId());
   const [qrInviteMerchantName, setQrInviteMerchantName] = useState("");
   const [followedMerchants, setFollowedMerchants] = useState([]);
@@ -820,6 +861,25 @@ export default function Bazodeal() {
       setDeals(data || []);
     } catch (err) {
       pop(err.message || "Could not load deals.", "error");
+    }
+  }, []);
+
+  const fetchEvents = useCallback(async () => {
+    try {
+      const { data, error } = await withTimeout(
+        supabase.from("events").select("*").order("starts_at", { ascending: true }),
+        12000,
+        "Loading events timed out."
+      );
+      if (error) {
+        console.error("Fetch events error:", error);
+        setEvents([]);
+        return;
+      }
+      setEvents(data || []);
+    } catch (err) {
+      console.error(err);
+      setEvents([]);
     }
   }, []);
 
@@ -1142,9 +1202,10 @@ export default function Bazodeal() {
 
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load
     fetchDeals();
+    fetchEvents();
 
     return () => { subscription.unsubscribe(); };
-  }, [fetchDeals, fetchProfile, fetchCart, fetchLikes, fetchMerchantFollows, fetchAllUsers, ensureProfile]);
+  }, [fetchDeals, fetchEvents, fetchProfile, fetchCart, fetchLikes, fetchMerchantFollows, fetchAllUsers, ensureProfile]);
 
   // Strip Chromium "scroll to text fragment" links (#:~:text=...) — they look broken in the bar and jump the page.
   const stripTextFragmentHash = useCallback(() => {
@@ -1163,7 +1224,9 @@ export default function Bazodeal() {
   useEffect(() => {
     const onHash = () => {
       stripTextFragmentHash();
-      if (window.location.hash.replace(/^#/, "") === "deal-sourcer") setView("sourcer");
+      const raw = window.location.hash.replace(/^#/, "");
+      if (raw === "deal-sourcer") setView("sourcer");
+      else if (raw === "events") setView("events");
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -1171,6 +1234,9 @@ export default function Bazodeal() {
 
   useEffect(() => {
     if (view !== "sourcer" && window.location.hash === "#deal-sourcer") {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    if (view !== "events" && window.location.hash === "#events") {
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
     }
   }, [view]);
@@ -1256,6 +1322,29 @@ export default function Bazodeal() {
     if (u) try { URL.revokeObjectURL(u); } catch { /* noop */ }
     setImageDraftFiles((f) => f.filter((_, i) => i !== index));
     setImageDraftPreviews((p) => p.filter((_, i) => i !== index));
+  };
+
+  const handleEventImageChange = (e) => {
+    const file = (e.target.files || [])[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      pop("Image must be 5MB or smaller.", "error");
+      return;
+    }
+    setEventImagePreview((prev) => {
+      if (prev) try { URL.revokeObjectURL(prev); } catch { /* noop */ }
+      return URL.createObjectURL(file);
+    });
+    setEventImageFile(file);
+  };
+
+  const removeEventImage = () => {
+    setEventImagePreview((prev) => {
+      if (prev) try { URL.revokeObjectURL(prev); } catch { /* noop */ }
+      return "";
+    });
+    setEventImageFile(null);
   };
 
   const uploadDealImagesToStorage = async (files) => {
@@ -1514,6 +1603,82 @@ export default function Bazodeal() {
     await fetchDeals();
     resetDealForm();
     pop("Deal is live! ✅");
+  };
+
+  const resetEventForm = () => {
+    setEventImagePreview((prev) => {
+      if (prev) try { URL.revokeObjectURL(prev); } catch { /* noop */ }
+      return "";
+    });
+    setEventImageFile(null);
+    setEventF({ title: "", description: "", venue: "", starts_at: "", ends_at: "", image_url: "" });
+  };
+
+  const postEvent = async () => {
+    if (!currentUser) {
+      setAuth("login");
+      return;
+    }
+    const { title, description, venue, starts_at, ends_at, image_url } = eventF;
+    if (!title?.trim()) {
+      pop("Event title is required.", "error");
+      return;
+    }
+    if (!starts_at) {
+      pop("Start date and time are required.", "error");
+      return;
+    }
+    if (!canPostDeals) {
+      pop("Your account is not approved to post deals yet. An admin must enable posting for your account first.", "error");
+      return;
+    }
+    setPosting(true);
+    let finalImageUrl = image_url?.trim() || null;
+    if (eventImageFile) {
+      const uploaded = await uploadDealImagesToStorage([eventImageFile]);
+      if (uploaded.length === 0) {
+        setPosting(false);
+        return;
+      }
+      finalImageUrl = uploaded[0];
+    }
+    const startsIso = new Date(starts_at).toISOString();
+    const endsIso = ends_at ? new Date(ends_at).toISOString() : null;
+    const { error } = await supabase.from("events").insert({
+      title: title.trim(),
+      description: description?.trim() || null,
+      venue: venue?.trim() || null,
+      starts_at: startsIso,
+      ends_at: endsIso,
+      image_url: finalImageUrl,
+      organizer_id: currentUser.id,
+      organizer_name: profile?.name || "Host",
+      approved: true,
+    });
+    setPosting(false);
+    if (error) {
+      pop("Failed to create event: " + error.message, "error");
+      return;
+    }
+    await fetchEvents();
+    resetEventForm();
+    pop("Event created! ✅");
+  };
+
+  const deleteEvent = async (ev) => {
+    if (!currentUser || !ev?.id) return;
+    if (ev.organizer_id !== currentUser.id && profile?.role !== "admin") {
+      pop("You can only delete your own events.", "error");
+      return;
+    }
+    if (!window.confirm("Delete this event?")) return;
+    const { error } = await supabase.from("events").delete().eq("id", ev.id);
+    if (error) {
+      pop("Could not delete: " + error.message, "error");
+      return;
+    }
+    await fetchEvents();
+    pop("Event removed.");
   };
 
   const toggleSourcerRow = (c, willSelect) => {
@@ -1984,6 +2149,17 @@ export default function Bazodeal() {
               Page
             </a>
           </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              setView("events");
+              window.location.hash = "events";
+            }}
+          >
+            📅 Events
+          </button>
           {currentUser && profile ? (
             <>
               <button
@@ -2022,6 +2198,14 @@ export default function Bazodeal() {
                     <div className="dd-name">{profile.name}</div>
                     <div className="dd-email">{currentUser.email}</div>
                     <div className="dd-item" onClick={() => { setView("home"); setDropdown(false); }}>🏠 Home</div>
+                    <div
+                      className="dd-item"
+                      onClick={() => {
+                        setView("events");
+                        setDropdown(false);
+                        window.location.hash = "events";
+                      }}
+                    >📅 Events</div>
                     <div
                       className="dd-item"
                       onClick={() => {
@@ -2424,6 +2608,191 @@ export default function Bazodeal() {
             <code style={{ fontSize:11, color:"var(--text2)" }}>deal-sourcer-scan</code>
             &nbsp;Edge Function in your Supabase project. You are responsible for content you publish; scan only sites you&apos;re allowed to reuse.
           </p>
+        </div>
+      )}
+
+      {/* ══ EVENTS ══ */}
+      {view === "events" && (
+        <div className="events-page page">
+          <div className="events-page-head">
+            <h1 className="page-title" style={{ margin: 0 }}>📅 Events</h1>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setView("home");
+                if (window.location.hash === "#events") {
+                  window.history.replaceState(null, "", window.location.pathname + window.location.search);
+                }
+              }}
+            >
+              ← Back to deals
+            </button>
+          </div>
+          <p style={{ fontSize: 14, color: "var(--text2)", marginBottom: 20, lineHeight: 1.5 }}>
+            Happenings from the Bazodeal community. Anyone approved to post deals can publish an event here.
+          </p>
+
+          {!currentUser && (
+            <div className="posting-gate" style={{ marginBottom: 20 }}>
+              <button type="button" className="btn btn-pri btn-sm" onClick={() => setAuth("login")}>Sign in</button>
+              {" "}to create events once an admin has enabled posting for your account.
+            </div>
+          )}
+
+          {currentUser && profile && canPostDeals && (
+            <div className="event-form">
+              <h3>Create an event</h3>
+              <div className="fg">
+                <label>Title</label>
+                <input
+                  className="inp"
+                  value={eventF.title}
+                  onChange={(e) => setEventF((f) => ({ ...f, title: e.target.value }))}
+                  placeholder="e.g. Sidewalk sale — Chaguanas"
+                />
+              </div>
+              <div className="fg">
+                <label>Venue (optional)</label>
+                <input
+                  className="inp"
+                  value={eventF.venue}
+                  onChange={(e) => setEventF((f) => ({ ...f, venue: e.target.value }))}
+                  placeholder="Address or online link"
+                />
+              </div>
+              <div className="fg">
+                <label>Description (optional)</label>
+                <textarea
+                  className="inp"
+                  rows={4}
+                  value={eventF.description}
+                  onChange={(e) => setEventF((f) => ({ ...f, description: e.target.value }))}
+                />
+              </div>
+              <div className="fg">
+                <label>Starts</label>
+                <input
+                  className="inp"
+                  type="datetime-local"
+                  value={eventF.starts_at}
+                  onChange={(e) => setEventF((f) => ({ ...f, starts_at: e.target.value }))}
+                />
+              </div>
+              <div className="fg">
+                <label>Ends (optional)</label>
+                <input
+                  className="inp"
+                  type="datetime-local"
+                  value={eventF.ends_at}
+                  onChange={(e) => setEventF((f) => ({ ...f, ends_at: e.target.value }))}
+                />
+              </div>
+              <div className="fg">
+                <label>Event image (optional)</label>
+                <p style={{ fontSize: 11, color: "var(--text3)", marginBottom: 8 }}>
+                  Upload a flyer or photo — same storage as deal images (JPG, PNG, or WEBP, max 5MB). Letterboxing matches deal uploads.
+                </p>
+                {!eventImagePreview ? (
+                  <div className="img-upload-area" style={{ position: "relative" }}>
+                    <div style={{ fontSize: 28 }}>🖼️</div>
+                    <div className="img-upload-label">Click to upload one image</div>
+                    <div className="img-upload-hint">JPG, PNG or WEBP · Max 5MB</div>
+                    <input
+                      id="event-img-input"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleEventImageChange}
+                      style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%" }}
+                    />
+                  </div>
+                ) : (
+                  <div className="deal-img-strip">
+                    <div className="deal-img-thumb">
+                      <img src={eventImagePreview} alt="Event preview" />
+                      <button type="button" className="deal-img-thumb-rm" onClick={removeEventImage} aria-label="Remove image">
+                        ×
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ alignSelf: "center" }}
+                      onClick={() => document.getElementById("event-img-input-replace")?.click()}
+                    >
+                      Replace
+                    </button>
+                    <input
+                      id="event-img-input-replace"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleEventImageChange}
+                      style={{ display: "none" }}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="fg">
+                <label>Image URL (optional)</label>
+                <input
+                  className="inp"
+                  type="url"
+                  value={eventF.image_url}
+                  onChange={(e) => setEventF((f) => ({ ...f, image_url: e.target.value }))}
+                  placeholder="https://… (used only if you do not upload a file above)"
+                />
+              </div>
+              <button type="button" className="btn btn-pri" disabled={posting} onClick={() => void postEvent()}>
+                {posting ? "Saving…" : "Publish event"}
+              </button>
+            </div>
+          )}
+
+          {currentUser && profile && !canPostDeals && (
+            <div className="posting-gate" style={{ marginBottom: 20 }}>
+              Your account is not approved to post deals yet. An admin must enable posting before you can create events.
+            </div>
+          )}
+
+          <div className="events-list">
+            {events.length === 0 ? (
+              <div className="empty">
+                <div className="empty-emo">📅</div>
+                <h3>No events listed yet</h3>
+                <p>Check back soon — or post one if you are approved.</p>
+              </div>
+            ) : (
+              events.map((ev) => {
+                const now = Date.now();
+                const past = ev.ends_at
+                  ? new Date(ev.ends_at).getTime() < now
+                  : new Date(ev.starts_at).getTime() < now;
+                return (
+                  <div key={ev.id} className={`event-card${past ? " event-card-past" : ""}`}>
+                    <div>
+                      <div className="event-when">{formatEventRange(ev.starts_at, ev.ends_at)}</div>
+                      <div className="event-title">{ev.title}</div>
+                      {ev.venue ? <div className="event-venue">📍 {ev.venue}</div> : null}
+                      {ev.description ? <div className="event-desc">{ev.description}</div> : null}
+                      <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 10 }}>
+                        Hosted by {ev.organizer_name || "Host"}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "end" }}>
+                      {ev.image_url ? (
+                        <img src={ev.image_url} alt="" className="event-card-img" loading="lazy" referrerPolicy="no-referrer" />
+                      ) : null}
+                      {currentUser && (ev.organizer_id === currentUser.id || profile?.role === "admin") ? (
+                        <button type="button" className="btn btn-red btn-sm" onClick={() => void deleteEvent(ev)}>
+                          Delete
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       )}
 

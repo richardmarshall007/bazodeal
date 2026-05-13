@@ -115,6 +115,24 @@ CREATE TABLE IF NOT EXISTS merchant_follows (
 CREATE INDEX IF NOT EXISTS merchant_follows_follower_idx ON merchant_follows (follower_id);
 CREATE INDEX IF NOT EXISTS merchant_follows_merchant_idx ON merchant_follows (merchant_id);
 
+-- Events (community / store calendar — same posting gate as deals: admin or can_post_deals)
+CREATE TABLE IF NOT EXISTS events (
+  id              UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
+  title           TEXT        NOT NULL,
+  description     TEXT,
+  venue           TEXT,
+  starts_at       TIMESTAMPTZ NOT NULL,
+  ends_at         TIMESTAMPTZ,
+  organizer_id    UUID        NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  organizer_name  TEXT      NOT NULL,
+  image_url       TEXT,
+  approved        BOOLEAN     NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS events_starts_at_idx ON events (starts_at DESC);
+CREATE INDEX IF NOT EXISTS events_organizer_idx ON events (organizer_id);
+
 -- Cart items
 CREATE TABLE IF NOT EXISTS cart_items (
   id       UUID    DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -181,6 +199,7 @@ ALTER TABLE profiles   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE deals      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE likes      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE merchant_follows ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cart_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
@@ -278,6 +297,35 @@ CREATE POLICY "Users insert own follows"
 
 CREATE POLICY "Users delete own follows"
   ON merchant_follows FOR DELETE USING (follower_id = auth.uid());
+
+-- ── Events ──────────────────────────────────────────────────
+CREATE POLICY "Events readable when approved or own or admin"
+  ON events FOR SELECT USING (
+    approved = true
+    OR auth.uid() = organizer_id
+    OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+  );
+
+CREATE POLICY "Who can post can create events"
+  ON events FOR INSERT WITH CHECK (
+    auth.uid() = organizer_id
+    AND (
+      EXISTS (SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.role = 'admin')
+      OR EXISTS (SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.can_post_deals = true)
+    )
+  );
+
+CREATE POLICY "Organizers update own events or admin"
+  ON events FOR UPDATE USING (
+    auth.uid() = organizer_id
+    OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+  );
+
+CREATE POLICY "Organizers delete own events or admin"
+  ON events FOR DELETE USING (
+    auth.uid() = organizer_id
+    OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+  );
 
 -- ── Cart items ──────────────────────────────────────────────
 CREATE POLICY "Users manage own cart"
@@ -462,3 +510,6 @@ GRANT SELECT ON deals_with_savings TO authenticated;
 GRANT SELECT ON order_summary TO authenticated;
 
 GRANT SELECT, INSERT, DELETE ON merchant_follows TO authenticated;
+
+GRANT SELECT ON events TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON events TO authenticated;
