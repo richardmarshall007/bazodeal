@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import { supabase } from "./lib/supabaseClient";
-import bazodealLogo from "./assets/bazodeal-logo.png";
+import bazodealLogo from "./assets/bazodeal-logo-brand.png";
 
 // ── Constants ────────────────────────────────────────────────
 const INTERESTS  = ["Electronics","Fashion","Home & Garden","Sports","Beauty","Travel","Food & Drink","Toys","Books","Automotive","Health","Jewellery","Outdoors","Gaming","Pets"];
@@ -300,10 +300,11 @@ body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--flame-orange),var(--flame-amber));border-radius:4px;opacity:.55}
 
-.hdr{position:sticky;top:0;z-index:200;background:rgba(8,7,10,.88);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,61,0,.35);box-shadow:0 1px 0 rgba(255,208,0,.08);min-height:48px;padding:6px 16px;display:flex;align-items:center;justify-content:space-between;}
-.logo{display:flex;align-items:center;cursor:pointer;user-select:none;line-height:0}
-.logo img{display:block;height:100px;width:auto}
-.nav{display:flex;align-items:center;gap:6px}
+.hdr{position:sticky;top:0;z-index:200;background:rgba(8,7,10,.88);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,61,0,.35);box-shadow:0 1px 0 rgba(255,208,0,.08);min-height:48px;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 14px}
+.logo{display:flex;align-items:center;cursor:pointer;user-select:none;line-height:0;flex-shrink:0}
+.logo img{display:block;height:clamp(92px,14vw,168px);width:auto;max-width:min(78vw,560px);object-fit:contain}
+.nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;min-width:0}
+.nav-filter-select{width:auto;min-width:min(112px,28vw);max-width:min(44vw,200px);margin:0;padding:6px 28px 6px 10px;font-size:12px;font-weight:700;line-height:1.2}
 
 .btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-family:'Nunito Sans';font-weight:700;font-size:13px;letter-spacing:.4px;transition:all .18s;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border2)}
@@ -322,12 +323,10 @@ body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden}
 .ticker-inner{display:inline-block;animation:tick 35s linear infinite;font-size:12px;font-weight:700;letter-spacing:1.5px;color:#fff;text-transform:uppercase}
 @keyframes tick{from{transform:translateX(100vw)}to{transform:translateX(-100%)}}
 
-.hero{padding:40px 24px 28px;text-align:center;background:radial-gradient(ellipse 65% 45% at 50% -10%,rgba(255,208,0,.14) 0%,rgba(255,61,0,.1) 38%,transparent 72%)}
+.hero{padding:28px 24px 28px;text-align:center;background:radial-gradient(ellipse 65% 45% at 50% -10%,rgba(255,208,0,.14) 0%,rgba(255,61,0,.1) 38%,transparent 72%)}
 .hero h1{font-family:'Bebas Neue';font-size:clamp(52px,9vw,108px);letter-spacing:5px;line-height:.95;color:var(--text)}
 .hero h1 em{background:linear-gradient(105deg,var(--flame-yellow),#fff4b0,var(--flame-orange));-webkit-background-clip:text;background-clip:text;color:transparent;font-style:normal;display:block}
 .hero p{color:var(--text2);font-size:15px;margin-top:14px;max-width:420px;margin-inline:auto;line-height:1.6}
-.hero-lead-wrap{width:100%;max-width:min(920px,94vw);margin:0 auto 22px;padding:0 16px;text-align:center}
-.hero-lead{margin:0;font-size:clamp(17px,2.8vw,34px);font-weight:900;line-height:1.25;letter-spacing:.03em;font-family:'Nunito Sans',sans-serif;color:var(--flame-yellow);text-shadow:0 0 24px rgba(255,208,0,.12)}
 .hero-spotlight-wrap{display:flex;justify-content:center;margin:0 auto 20px;width:100%;max-width:1000px;padding:0 4px}
 .hero-spotlight{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;display:flex;width:100%;align-items:stretch;text-align:left;box-shadow:0 16px 48px rgba(0,0,0,.35);transition:border .22s}
 .hero-spotlight:hover{border-color:rgba(255,61,0,.35)}
@@ -378,8 +377,6 @@ body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden}
 .hero-stat-n{font-family:'Bebas Neue';font-size:clamp(30px,4.8vw,44px);letter-spacing:2px;color:var(--gold);line-height:1}
 .hero-stat.hero-stat-wide{min-width:min(184px,86vw)}
 
-.filters{padding:14px 24px 10px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
-.filters::-webkit-scrollbar{display:none}
 .pill{padding:5px 14px;border-radius:100px;border:1px solid var(--border2);background:transparent;color:var(--text2);font-family:'Nunito Sans';font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .18s;letter-spacing:.3px}
 .pill:hover{border-color:var(--flame-yellow);color:var(--flame-yellow)}.pill.active{background:linear-gradient(135deg,var(--flame-orange),#e63d00);border-color:var(--flame-orange);color:#fff;box-shadow:0 4px 16px rgba(255,61,0,.3)}
 
@@ -772,6 +769,7 @@ export default function Bazodeal() {
   const [cart, setCart]               = useState([]);
   const [liked, setLiked]             = useState(new Set());
   const [filterCat, setFilterCat]     = useState("All");
+  const [filterMerchantId, setFilterMerchantId] = useState("");
   const [sourcerPageUrl, setSourcerPageUrl]   = useState("");
   const [sourcerFetchBusy, setSourcerFetchBusy] = useState(false);
   const [sourcerFetchErr, setSourcerFetchErr] = useState("");
@@ -810,7 +808,6 @@ export default function Bazodeal() {
   const [qrInviteMerchantId, setQrInviteMerchantId] = useState(() => readInitialJoinMerchantId());
   const [qrInviteMerchantName, setQrInviteMerchantName] = useState("");
   const [followedMerchants, setFollowedMerchants] = useState([]);
-  const [filterFollowedOnly, setFilterFollowedOnly] = useState(false);
   const [merchantJoinQrDataUrl, setMerchantJoinQrDataUrl] = useState("");
   const qrRegisterAutoOpened = useRef(false);
 
@@ -1995,10 +1992,22 @@ export default function Bazodeal() {
   const activeDeals   = deals.filter(isDealActive);
   const liveDeals     = activeDeals;
   const expiredDeals  = deals.filter(d => !isDealActive(d));
+  const merchantFilterOptions = useMemo(() => {
+    const map = new Map();
+    for (const d of deals) {
+      if (!isDealActive(d)) continue;
+      if (d.merchant_id && d.merchant_name) map.set(d.merchant_id, d.merchant_name);
+    }
+    return [...map.entries()].sort((a, b) =>
+      String(a[1]).localeCompare(String(b[1]), undefined, { sensitivity: "base" })
+    );
+  }, [deals]);
   const filteredDeals = liveDeals.filter((d) => {
-    if (filterFollowedOnly) {
+    if (filterMerchantId === "__followed__") {
       if (followedMerchants.length === 0) return false;
       if (!followedMerchants.includes(d.merchant_id)) return false;
+    } else if (filterMerchantId) {
+      if (d.merchant_id !== filterMerchantId) return false;
     }
     return filterCat === "All" || d.category === filterCat;
   });
@@ -2149,6 +2158,38 @@ export default function Bazodeal() {
               Page
             </a>
           </div>
+          {view === "home" && (
+            <>
+              <select
+                id="filter-category"
+                className="inp nav-filter-select"
+                aria-label="Category"
+                value={filterCat}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setFilterCat(e.target.value)}
+              >
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <select
+                id="filter-merchant"
+                className="inp nav-filter-select"
+                aria-label="Posted by"
+                value={filterMerchantId}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setFilterMerchantId(e.target.value)}
+              >
+                <option value="">All merchants</option>
+                {currentUser && followedMerchants.length > 0 ? (
+                  <option value="__followed__">Stores I follow</option>
+                ) : null}
+                {merchantFilterOptions.map(([id, name]) => (
+                  <option key={id} value={id}>{name}</option>
+                ))}
+              </select>
+            </>
+          )}
           <button
             type="button"
             className="btn btn-ghost btn-sm"
@@ -2238,9 +2279,6 @@ export default function Bazodeal() {
       {view === "home" && (
         <>
           <div className="hero">
-            <div className="hero-lead-wrap" aria-label="Site tagline">
-              <p className="hero-lead">{`Get Bazodee!!! with our Big Daily Deals from Trinidad and Tobago's #1 DEAL SITE`}</p>
-            </div>
             {currentUser && profile && (
               <div className="home-sourcer-cta">
                 <button
@@ -2366,44 +2404,23 @@ export default function Bazodeal() {
               </div>
             </div>
           </div>
-          <div className="filters">
-            {CATEGORIES.map(c => (
-              <button
-                key={c}
-                type="button"
-                className={`pill ${filterCat === c ? "active" : ""}`}
-                onClick={() => {
-                  setFilterCat(c);
-                  setFilterFollowedOnly(false);
-                }}
-              >
-                {c}
-              </button>
-            ))}
-            {currentUser && followedMerchants.length > 0 && (
-              <button
-                type="button"
-                className={`pill ${filterFollowedOnly ? "active" : ""}`}
-                onClick={() => {
-                  setFilterFollowedOnly((v) => !v);
-                  setFilterCat("All");
-                }}
-              >
-                My stores
-              </button>
-            )}
-          </div>
           <div className="grid">
             {filteredDeals.length === 0 ? (
               <div className="empty" style={{ gridColumn:"1/-1" }}>
                 <div className="empty-emo">🛍️</div>
-                <h3>{filterFollowedOnly && followedMerchants.length === 0 ? "No followed stores yet" : "No Deals Yet"}</h3>
+                <h3>
+                  {filterMerchantId === "__followed__" && followedMerchants.length === 0
+                    ? "No followed stores yet"
+                    : "No Deals Yet"}
+                </h3>
                 <p>
-                  {filterFollowedOnly && followedMerchants.length === 0
+                  {filterMerchantId === "__followed__" && followedMerchants.length === 0
                     ? "Scan a store’s QR code or open their join link to follow them here."
-                    : filterFollowedOnly
-                      ? "No live deals from your followed stores in this category — try All or another category."
-                      : "Check back soon or try a different category."}
+                    : filterMerchantId === "__followed__"
+                      ? "No live deals from your followed stores with these filters — try All categories or All merchants."
+                      : filterMerchantId
+                        ? "No live deals from this merchant with the selected category."
+                        : "Check back soon or adjust the filters above."}
                 </p>
               </div>
             ) : filteredDeals.map(deal => (
