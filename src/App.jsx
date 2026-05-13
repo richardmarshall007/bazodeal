@@ -14,6 +14,30 @@ const GENDERS    = ["Male","Female","Non-binary","Prefer not to say"];
 const EMOJIS     = ["🛍️","📱","👗","🏠","⚽","💄","✈️","🍕","🧸","📚","🚗","💊","💍","🏕️","🎮","🐾","🎵","🍫","🏋️","🖥️"];
 const TODAY      = new Date().toISOString().split("T")[0];
 const MAX_DEAL_IMAGES = 8;
+/** Session + URL param `?m=<uuid>`: merchant to follow after signup / login. */
+const QR_MERCHANT_STORAGE = "bazodeal-join-merchant";
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function readInitialJoinMerchantId() {
+  if (typeof window === "undefined") return null;
+  try {
+    const q = new URLSearchParams(window.location.search).get("m");
+    if (q && UUID_RE.test(q)) {
+      sessionStorage.setItem(QR_MERCHANT_STORAGE, q);
+      return q;
+    }
+  } catch {
+    /* noop */
+  }
+  try {
+    const s = sessionStorage.getItem(QR_MERCHANT_STORAGE);
+    if (s && UUID_RE.test(s)) return s;
+  } catch {
+    /* noop */
+  }
+  return null;
+}
 
 const finalPrice = d => +(+d.retail_price * (1 - +d.discount_pct / 100)).toFixed(2);
 const savings    = d => +(+d.retail_price - finalPrice(d)).toFixed(2);
@@ -740,8 +764,14 @@ export default function Bazodeal() {
   const [radioStreamPlaying, setRadioStreamPlaying] = useState(false);
   const radioAudioRef = useRef(null);
   const [loginF, setLoginF] = useState({ email:"", password:"" });
-  const [regF,   setRegF]   = useState({ email:"", password:"", name:"", phone:"", dobMonth:"", dobYear:"", gender:"", interests:[] });
+  const [regF,   setRegF]   = useState({ email:"", password:"", name:"", phone:"", dobMonth:"", dobYear:"", gender:"", interests:[], whatsappOptIn: true });
   const [dealF,  setDealF]  = useState({ title:"", category:"Electronics", retailPrice:"", salePrice:"", emoji:"🛍️", description:"", stock:"", expires:"" });
+  const [qrInviteMerchantId, setQrInviteMerchantId] = useState(() => readInitialJoinMerchantId());
+  const [qrInviteMerchantName, setQrInviteMerchantName] = useState("");
+  const [followedMerchants, setFollowedMerchants] = useState([]);
+  const [filterFollowedOnly, setFilterFollowedOnly] = useState(false);
+  const [merchantJoinQrDataUrl, setMerchantJoinQrDataUrl] = useState("");
+  const qrRegisterAutoOpened = useRef(false);
 
   // ── Helpers ──────────────────────────────────────────────
   const pop = (msg, type = "success") => {
@@ -839,6 +869,16 @@ export default function Bazodeal() {
     setLiked(new Set((data || []).map(l => l.deal_id)));
   }, []);
 
+  const fetchMerchantFollows = useCallback(async (uid) => {
+    const { data, error } = await supabase.from("merchant_follows").select("merchant_id").eq("follower_id", uid);
+    if (error) {
+      console.warn("merchant_follows:", error.message);
+      setFollowedMerchants([]);
+      return;
+    }
+    setFollowedMerchants((data || []).map((r) => r.merchant_id));
+  }, []);
+
   // Uses profiles_with_email view to include email in admin panel
   const fetchAllUsers = useCallback(async () => {
     const { data } = await supabase
@@ -913,6 +953,137 @@ export default function Bazodeal() {
     [allUsers, concurrentDrafts, fetchAllUsers, fetchProfile, currentUser?.id, pop],
   );
 
+  const clearJoinMerchantTracking = useCallback(() => {
+    setQrInviteMerchantId(null);
+    setQrInviteMerchantName("");
+    try {
+      sessionStorage.removeItem(QR_MERCHANT_STORAGE);
+    } catch { /* noop */ }
+    try {
+      const u = new URL(window.location.href);
+      if (u.searchParams.has("m")) {
+        u.searchParams.delete("m");
+        window.history.replaceState(null, "", u.pathname + u.search + (u.hash || ""));
+      }
+    } catch { /* noop */ }
+  }, []);
+
+  const tryInvokeMerchantWhatsapp = async (merchantId) => {
+    if (!merchantId) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const token = session.access_token;
+      const body = { merchant_id: merchantId };
+      let { data, error } = await supabase.functions.invoke("merchant-welcome-whatsapp", {
+        body,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(anonKey ? { apikey: anonKey } : {}),
+        },
+      });
+      const proxyEnabled = envFlagTrue(import.meta.env.VITE_MERCHANT_WHATSAPP_PROXY ?? "true");
+      const fetchLikelyFailed =
+        error?.name === "FunctionsFetchError" ||
+        (error?.context instanceof Error && /failed\s+to\s+fetch/i.test(error.context.message));
+      if (error && proxyEnabled && typeof window !== "undefined" && fetchLikelyFailed) {
+        const proxied = await fetch(`${window.location.origin}/api/merchant-welcome-whatsapp`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            ...(anonKey ? { apikey: anonKey } : {}),
+          },
+          body: JSON.stringify(body),
+        });
+        const text = await proxied.text();
+        let parsed = null;
+        try {
+          parsed = text ? JSON.parse(text) : null;
+        } catch {
+          parsed = { error: text?.slice(0, 200) };
+        }
+        data = parsed;
+        error = proxied.ok ? null : new Error(typeof parsed?.error === "string" ? parsed.error : "WhatsApp send failed");
+      }
+      if (error) {
+        console.warn("merchant-welcome-whatsapp:", error.message || error);
+        return;
+      }
+      if (data?.sent) {
+        /* Main welcome toast already shown from signup/login. */
+      }
+    } catch (e) {
+      console.warn("merchant-welcome-whatsapp", e);
+    }
+  };
+
+  const completeMerchantJoin = async (userId, { whatsappOptIn }) => {
+    let stored = null;
+    try {
+      stored = sessionStorage.getItem(QR_MERCHANT_STORAGE);
+    } catch { /* noop */ }
+    const fromState = qrInviteMerchantId;
+    const mid =
+      (fromState && UUID_RE.test(fromState) ? fromState : null) ||
+      (stored && UUID_RE.test(stored) ? stored : null);
+    if (!mid || !UUID_RE.test(mid) || mid === userId) {
+      clearJoinMerchantTracking();
+      return null;
+    }
+    const { data: mp, error: pe } = await supabase.from("profiles").select("id,name").eq("id", mid).maybeSingle();
+    if (pe || !mp?.id) {
+      clearJoinMerchantTracking();
+      pop("That store signup link is not valid anymore.", "error");
+      return null;
+    }
+    const row = {
+      follower_id: userId,
+      merchant_id: mid,
+      source: "qr",
+      whatsapp_opt_in: Boolean(whatsappOptIn),
+    };
+    const { error: insErr } = await supabase.from("merchant_follows").insert(row);
+    const alreadyFollowing = insErr?.code === "23505";
+    if (insErr && !alreadyFollowing) {
+      console.error(insErr);
+      pop(insErr.message || "Could not save store follow.", "error");
+      clearJoinMerchantTracking();
+      return null;
+    }
+    await fetchMerchantFollows(userId);
+    if (!alreadyFollowing && Boolean(whatsappOptIn)) await tryInvokeMerchantWhatsapp(mid);
+    const storeName = mp.name || "this store";
+    clearJoinMerchantTracking();
+    qrRegisterAutoOpened.current = false;
+    return storeName;
+  };
+
+  useEffect(() => {
+    if (!qrInviteMerchantId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset store label when invite cleared
+      setQrInviteMerchantName("");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase.from("profiles").select("name").eq("id", qrInviteMerchantId).maybeSingle();
+      if (!cancelled) setQrInviteMerchantName(data?.name || "This store");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [qrInviteMerchantId]);
+
+  useEffect(() => {
+    if (loading || currentUser || !qrInviteMerchantId) return;
+    if (qrRegisterAutoOpened.current) return;
+    qrRegisterAutoOpened.current = true;
+    setAuth("register");
+  }, [loading, currentUser, qrInviteMerchantId]);
+
   // ── Bootstrap ────────────────────────────────────────────
   useEffect(() => {
     const hydrateUser = async (user) => {
@@ -934,6 +1105,7 @@ export default function Bazodeal() {
       Promise.allSettled([
         withTimeout(fetchCart(user.id), 8000, "Loading cart timed out."),
         withTimeout(fetchLikes(user.id), 8000, "Loading likes timed out."),
+        withTimeout(fetchMerchantFollows(user.id), 8000, "Loading follows timed out."),
         profileResult?.role === "admin"
           ? withTimeout(fetchAllUsers(), 8000, "Loading members timed out.")
           : Promise.resolve(),
@@ -963,15 +1135,16 @@ export default function Bazodeal() {
         if (session?.user) {
           hydrateUser(session.user);
         } else {
-          setCurrentUser(null); setProfile(null); setCart([]); setLiked(new Set());
+          setCurrentUser(null); setProfile(null); setCart([]); setLiked(new Set()); setFollowedMerchants([]);
         }
       }
     );
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data load
     fetchDeals();
 
     return () => { subscription.unsubscribe(); };
-  }, [fetchDeals, fetchProfile, fetchCart, fetchLikes, fetchAllUsers, ensureProfile]);
+  }, [fetchDeals, fetchProfile, fetchCart, fetchLikes, fetchMerchantFollows, fetchAllUsers, ensureProfile]);
 
   // Strip Chromium "scroll to text fragment" links (#:~:text=...) — they look broken in the bar and jump the page.
   const stripTextFragmentHash = useCallback(() => {
@@ -1147,20 +1320,31 @@ export default function Bazodeal() {
   // ── Auth ─────────────────────────────────────────────────
   const doLogin = async () => {
     setFormErr(""); setPosting(true);
-    const { error } = await supabase.auth.signInWithPassword({ email: loginF.email, password: loginF.password });
+    const { data: authData, error } = await supabase.auth.signInWithPassword({ email: loginF.email, password: loginF.password });
     setPosting(false);
     if (error) { setFormErr(error.message); return; }
     setAuth(null);
     setLoginF({ email:"", password:"" });
-    pop("Welcome back! 🔥");
+    const uid = authData?.user?.id;
+    let welcome = "Welcome back! 🔥";
+    if (uid) {
+      const store = await completeMerchantJoin(uid, { whatsappOptIn: true });
+      if (store) welcome = `Welcome back! You're now following ${store}.`;
+    }
+    pop(welcome);
   };
 
   const doRegister = async () => {
     setFormErr(""); setPosting(true);
-    const { email, password, name, phone, dobMonth, dobYear, gender, interests } = regF;
+    const { email, password, name, phone, dobMonth, dobYear, gender, interests, whatsappOptIn } = regF;
     if (!name || !email || !password) {
       setFormErr("Full name, email and password are required.");
       setPosting(false); return;
+    }
+    if (qrInviteMerchantId && whatsappOptIn && !phone?.trim()) {
+      setFormErr("Add your mobile number (with country code if outside Trinidad) so we can send WhatsApp updates from this store.");
+      setPosting(false);
+      return;
     }
     const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { name } } });
     if (error) {
@@ -1172,10 +1356,16 @@ export default function Bazodeal() {
         const loginAttempt = await supabase.auth.signInWithPassword({ email, password });
         if (!loginAttempt.error && loginAttempt.data?.user) {
           await ensureProfile(loginAttempt.data.user, { name, phone, dobMonth, dobYear, gender, interests });
+          const uid = loginAttempt.data.user.id;
+          const followed = await completeMerchantJoin(uid, { whatsappOptIn });
           setPosting(false);
           setAuth(null);
-          setRegF({ email:"", password:"", name:"", phone:"", dobMonth:"", dobYear:"", gender:"", interests:[] });
-          pop("Welcome back! Account already existed, so we signed you in.");
+          setRegF({ email:"", password:"", name:"", phone:"", dobMonth:"", dobYear:"", gender:"", interests:[], whatsappOptIn: true });
+          pop(
+            followed
+              ? `Welcome back! You're now following ${followed}.`
+              : "Welcome back! Account already existed, so we signed you in.",
+          );
           return;
         }
         setFormErr("This email is already registered. Please sign in or reset your password.");
@@ -1187,6 +1377,7 @@ export default function Bazodeal() {
       setPosting(false);
       return;
     }
+    let followedName = null;
     if (data.user) {
       const ensured = await ensureProfile(data.user, { name, phone, dobMonth, dobYear, gender, interests });
       const profileError = !ensured ? { message: "Could not create profile row." } : null;
@@ -1196,16 +1387,18 @@ export default function Bazodeal() {
         setPosting(false);
         return;
       }
+      followedName = await completeMerchantJoin(data.user.id, { whatsappOptIn });
     }
     setPosting(false);
     setAuth(null);
-    setRegF({ email:"", password:"", name:"", phone:"", dobMonth:"", dobYear:"", gender:"", interests:[] });
-    pop("You're in! Welcome to Bazodeal 🎉");
+    setRegF({ email:"", password:"", name:"", phone:"", dobMonth:"", dobYear:"", gender:"", interests:[], whatsappOptIn: true });
+    pop(followedName ? `You're in! You're following ${followedName}.` : "You're in! Welcome to Bazodeal 🎉");
   };
 
   const doLogout = async () => {
     await supabase.auth.signOut();
     setDropdown(false); setView("home");
+    qrRegisterAutoOpened.current = false;
     pop("Logged out. See you next time!");
   };
 
@@ -1637,13 +1830,20 @@ export default function Bazodeal() {
   const activeDeals   = deals.filter(isDealActive);
   const liveDeals     = activeDeals;
   const expiredDeals  = deals.filter(d => !isDealActive(d));
-  const filteredDeals = liveDeals.filter(d => filterCat === "All" || d.category === filterCat);
+  const filteredDeals = liveDeals.filter((d) => {
+    if (filterFollowedOnly) {
+      if (followedMerchants.length === 0) return false;
+      if (!followedMerchants.includes(d.merchant_id)) return false;
+    }
+    return filterCat === "All" || d.category === filterCat;
+  });
   const featuredSlides = useMemo(() => buildFeaturedSlideshow(liveDeals), [deals]);
   const totalLiveLikes = liveDeals.reduce((s, d) => s + (+d.like_count || 0), 0);
   const totalPotentialSavings = +liveDeals.reduce((s, d) => s + savings(d), 0).toFixed(2);
   const toggleInterest = i => setRegF(p => ({ ...p, interests: p.interests.includes(i) ? p.interests.filter(x => x !== i) : [...p.interests, i] }));
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clamp slide index when featured set shrinks
     setHeroSlideIdx(i => {
       if (featuredSlides.length === 0) return 0;
       return Math.min(i, featuredSlides.length - 1);
@@ -1679,6 +1879,28 @@ export default function Bazodeal() {
       el.pause();
     };
   }, [loading]);
+
+  useEffect(() => {
+    if (view !== "merchant" || !currentUser?.id || !canPostDeals) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hide QR when leaving merchant dashboard
+      setMerchantJoinQrDataUrl("");
+      return;
+    }
+    let cancelled = false;
+    const origin = typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "";
+    const joinUrl = `${origin}/?m=${encodeURIComponent(currentUser.id)}`;
+    import("qrcode")
+      .then((QR) => QR.default.toDataURL(joinUrl, { width: 220, margin: 2, color: { dark: "#111111", light: "#ffffff" } }))
+      .then((url) => {
+        if (!cancelled) setMerchantJoinQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setMerchantJoinQrDataUrl("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, currentUser?.id, canPostDeals]);
 
   const DealCardImage = ({ deal }) => {
     const cover = dealCoverUrl(deal);
@@ -1962,15 +2184,43 @@ export default function Bazodeal() {
           </div>
           <div className="filters">
             {CATEGORIES.map(c => (
-              <button key={c} className={`pill ${filterCat === c ? "active" : ""}`} onClick={() => setFilterCat(c)}>{c}</button>
+              <button
+                key={c}
+                type="button"
+                className={`pill ${filterCat === c ? "active" : ""}`}
+                onClick={() => {
+                  setFilterCat(c);
+                  setFilterFollowedOnly(false);
+                }}
+              >
+                {c}
+              </button>
             ))}
+            {currentUser && followedMerchants.length > 0 && (
+              <button
+                type="button"
+                className={`pill ${filterFollowedOnly ? "active" : ""}`}
+                onClick={() => {
+                  setFilterFollowedOnly((v) => !v);
+                  setFilterCat("All");
+                }}
+              >
+                My stores
+              </button>
+            )}
           </div>
           <div className="grid">
             {filteredDeals.length === 0 ? (
               <div className="empty" style={{ gridColumn:"1/-1" }}>
                 <div className="empty-emo">🛍️</div>
-                <h3>No Deals Yet</h3>
-                <p>Check back soon or try a different category.</p>
+                <h3>{filterFollowedOnly && followedMerchants.length === 0 ? "No followed stores yet" : "No Deals Yet"}</h3>
+                <p>
+                  {filterFollowedOnly && followedMerchants.length === 0
+                    ? "Scan a store’s QR code or open their join link to follow them here."
+                    : filterFollowedOnly
+                      ? "No live deals from your followed stores in this category — try All or another category."
+                      : "Check back soon or try a different category."}
+                </p>
               </div>
             ) : filteredDeals.map(deal => (
               <div
@@ -2253,6 +2503,74 @@ export default function Bazodeal() {
             <h1>🏪 {profile.role === "admin" ? "Deals Dashboard" : "Post a Deal"}</h1>
             <button className="btn btn-ghost btn-sm" onClick={() => setView("home")}>← Back</button>
           </div>
+          {canPostDeals && (
+            <div
+              className="merchant-join-qr"
+              style={{
+                marginBottom: 24,
+                padding: 18,
+                borderRadius: 16,
+                border: "1px solid var(--border)",
+                background: "var(--card)",
+              }}
+            >
+              <h3 style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 1, marginBottom: 8 }}>
+                Your store signup &amp; QR
+              </h3>
+              <p style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.5, marginBottom: 14 }}>
+                Print or display this QR so shoppers open Bazodeal with your store ID. They create a free account, follow you here, and can get a one-time WhatsApp welcome when Twilio WhatsApp is configured on Supabase.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-start" }}>
+                {merchantJoinQrDataUrl ? (
+                  <img
+                    src={merchantJoinQrDataUrl}
+                    alt="QR code linking to your Bazodeal store signup"
+                    width={220}
+                    height={220}
+                    style={{ borderRadius: 12, border: "1px solid var(--border2)" }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: 220,
+                      height: 220,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "var(--bg3)",
+                      borderRadius: 12,
+                      fontSize: 13,
+                      color: "var(--text3)",
+                    }}
+                  >
+                    Building QR…
+                  </div>
+                )}
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>
+                    Join link (same as QR)
+                  </div>
+                  <input
+                    readOnly
+                    className="inp"
+                    style={{ marginTop: 6, fontSize: 12 }}
+                    value={`${typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : ""}/?m=${currentUser.id}`}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ marginTop: 10 }}
+                    onClick={() => {
+                      const t = `${window.location.origin.replace(/\/$/, "")}/?m=${currentUser.id}`;
+                      void navigator.clipboard.writeText(t).then(() => pop("Link copied")).catch(() => pop("Could not copy link.", "error"));
+                    }}
+                  >
+                    Copy link
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {!canPostDeals ? (
             <div className="posting-gate">
               Posting is turned off for new accounts until an admin reviews and approves you. This helps keep Bazodeal free of spam and inappropriate listings.
@@ -2473,6 +2791,14 @@ export default function Bazodeal() {
           <div className="modal">
             <div className="modal-title">Join Bazodeal 🎉</div>
             <div className="modal-sub">Create your free account and start saving today.</div>
+            {qrInviteMerchantId && (
+              <div
+                className="posting-gate"
+                style={{ marginBottom:14, textAlign:"left", fontSize:13, lineHeight:1.45 }}
+              >
+                You&apos;re signing up from <strong>{qrInviteMerchantName || "a store"}</strong>&apos;s QR link. After you join, you&apos;ll follow their deals on Bazodeal. WhatsApp is optional and uses Twilio when your project has it configured.
+              </div>
+            )}
             {formErr && <div className="err-box">{formErr}</div>}
             <div className="fg"><label>Your Public Name or Company *</label>
               <input className="inp" placeholder="e.g. Acme Supplies" value={regF.name}
@@ -2486,10 +2812,23 @@ export default function Bazodeal() {
               <input className="inp" type="password" placeholder="Choose a strong password" value={regF.password}
                 onChange={e => setRegF(p => ({ ...p, password: e.target.value }))} />
             </div>
-            <div className="fg"><label>Phone Number</label>
-              <input className="inp" type="tel" placeholder="e.g. 868-XXX-XXXX" value={regF.phone}
+            <div className="fg"><label>Phone Number{qrInviteMerchantId && regF.whatsappOptIn ? " *" : ""}</label>
+              <input className="inp" type="tel" placeholder="e.g. +18681234567 or 868-123-4567" value={regF.phone}
                 onChange={e => setRegF(p => ({ ...p, phone: e.target.value }))} />
             </div>
+            {qrInviteMerchantId && (
+              <label className="fg" style={{ display:"flex", alignItems:"flex-start", gap:10, cursor:"pointer", fontSize:13, lineHeight:1.45 }}>
+                <input
+                  type="checkbox"
+                  checked={regF.whatsappOptIn}
+                  onChange={(e) => setRegF((p) => ({ ...p, whatsappOptIn: e.target.checked }))}
+                  style={{ marginTop:3 }}
+                />
+                <span>
+                  Send me a <strong>WhatsApp welcome</strong> from Bazodeal about <strong>{qrInviteMerchantName || "this store"}</strong> (requires Twilio on Supabase). I understand future messages may be sent according to your project&apos;s policies.
+                </span>
+              </label>
+            )}
             <div className="row2">
               <div className="fg"><label>Birth Month</label>
                 <select className="inp" value={regF.dobMonth} onChange={e => setRegF(p => ({ ...p, dobMonth: e.target.value }))}>

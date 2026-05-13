@@ -59,12 +59,16 @@ CREATE TABLE IF NOT EXISTS profiles (
   role        TEXT        NOT NULL DEFAULT 'user'
                           CHECK (role IN ('user', 'merchant', 'admin')),
   concurrent_deals_limit INTEGER NOT NULL DEFAULT 1 CHECK (concurrent_deals_limit >= 1),
+  can_post_deals BOOLEAN NOT NULL DEFAULT false,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Existing DBs: add the concurrency limit column if it doesn't exist yet.
 ALTER TABLE profiles
   ADD COLUMN IF NOT EXISTS concurrent_deals_limit INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS can_post_deals BOOLEAN NOT NULL DEFAULT false;
 
 -- Deals
 CREATE TABLE IF NOT EXISTS deals (
@@ -95,6 +99,21 @@ CREATE TABLE IF NOT EXISTS likes (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (user_id, deal_id)
 );
+
+-- Merchant QR: customers follow a store (signup / opt-in for WhatsApp welcome via Edge Function)
+CREATE TABLE IF NOT EXISTS merchant_follows (
+  id              UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
+  follower_id     UUID        NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  merchant_id     UUID        NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  source          TEXT        NOT NULL DEFAULT 'qr',
+  whatsapp_opt_in BOOLEAN     NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (follower_id, merchant_id),
+  CONSTRAINT merchant_follows_no_self CHECK (follower_id IS DISTINCT FROM merchant_id)
+);
+
+CREATE INDEX IF NOT EXISTS merchant_follows_follower_idx ON merchant_follows (follower_id);
+CREATE INDEX IF NOT EXISTS merchant_follows_merchant_idx ON merchant_follows (merchant_id);
 
 -- Cart items
 CREATE TABLE IF NOT EXISTS cart_items (
@@ -161,6 +180,7 @@ GRANT EXECUTE ON FUNCTION public.merchant_active_deal_count(uuid) TO service_rol
 ALTER TABLE profiles   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE deals      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE likes      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE merchant_follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cart_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
@@ -174,6 +194,14 @@ CREATE POLICY "Users can insert own profile"
 
 CREATE POLICY "Users can update own profile"
   ON profiles FOR UPDATE USING (auth.uid() = id);
+
+CREATE POLICY "Admins update any member profile"
+  ON profiles FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM profiles p
+      WHERE p.id = auth.uid() AND p.role = 'admin'
+    )
+  );
 
 -- ── Deals ───────────────────────────────────────────────────
 -- Approved deals: visible to everyone
@@ -191,15 +219,19 @@ CREATE POLICY "Authenticated users can post deals"
   ON deals FOR INSERT WITH CHECK (
     auth.uid() = merchant_id
     AND (
-      -- Admins can always post.
       EXISTS (
         SELECT 1 FROM profiles p
         WHERE p.id = auth.uid()
           AND p.role = 'admin'
       )
       OR
-      -- Non-admins: active deals (approved + not expired) must be below the user's limit.
       (
+        EXISTS (
+          SELECT 1 FROM profiles p
+          WHERE p.id = auth.uid()
+            AND p.can_post_deals = true
+        )
+        AND
         GREATEST(
           COALESCE(
             (SELECT p.concurrent_deals_limit FROM profiles p WHERE p.id = auth.uid()),
@@ -232,6 +264,20 @@ CREATE POLICY "Likes are public"
 
 CREATE POLICY "Users manage own likes"
   ON likes FOR ALL USING (auth.uid() = user_id);
+
+-- ── Merchant follows (QR signup / store audience) ──────────
+CREATE POLICY "Follows readable by follower or merchant or admin"
+  ON merchant_follows FOR SELECT USING (
+    follower_id = auth.uid()
+    OR merchant_id = auth.uid()
+    OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+  );
+
+CREATE POLICY "Users insert own follows"
+  ON merchant_follows FOR INSERT WITH CHECK (follower_id = auth.uid());
+
+CREATE POLICY "Users delete own follows"
+  ON merchant_follows FOR DELETE USING (follower_id = auth.uid());
 
 -- ── Cart items ──────────────────────────────────────────────
 CREATE POLICY "Users manage own cart"
@@ -294,17 +340,50 @@ CREATE TRIGGER on_like_change
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO profiles (id, name, role, concurrent_deals_limit)
+  INSERT INTO profiles (id, name, role, concurrent_deals_limit, can_post_deals)
   VALUES (
     NEW.id,
     COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
     'user',
-    1
+    1,
+    false
   )
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Prevent non-admins from granting themselves posting rights or changing role via the client.
+CREATE OR REPLACE FUNCTION public.profiles_enforce_privileged_fields()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  is_admin boolean;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles p
+    WHERE p.id = auth.uid() AND p.role = 'admin'
+  ) INTO is_admin;
+
+  IF TG_OP = 'INSERT' THEN
+    NEW.can_post_deals := false;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'UPDATE' AND NEW.id IS NOT DISTINCT FROM auth.uid() AND NOT is_admin THEN
+    NEW.role := OLD.role;
+    NEW.can_post_deals := OLD.can_post_deals;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS profiles_enforce_privileged_fields ON profiles;
+CREATE TRIGGER profiles_enforce_privileged_fields
+  BEFORE INSERT OR UPDATE ON profiles
+  FOR EACH ROW EXECUTE FUNCTION public.profiles_enforce_privileged_fields();
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
@@ -349,7 +428,9 @@ SELECT
   p.interests,
   p.role,
   p.created_at,
-  au.email
+  au.email,
+  p.concurrent_deals_limit,
+  p.can_post_deals
 FROM profiles p
 JOIN auth.users au ON au.id = p.id;
 
@@ -379,3 +460,5 @@ GROUP BY o.id, p.name;
 GRANT SELECT ON profiles_with_email TO authenticated;
 GRANT SELECT ON deals_with_savings TO authenticated;
 GRANT SELECT ON order_summary TO authenticated;
+
+GRANT SELECT, INSERT, DELETE ON merchant_follows TO authenticated;

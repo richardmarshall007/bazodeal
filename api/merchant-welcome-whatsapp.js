@@ -1,11 +1,6 @@
 /**
- * Same-origin proxy for Deal Sourcer → Supabase Edge Function.
- * Deploy on Vercel: the browser calls https://YOUR_DOMAIN/api/deal-sourcer-scan
- * and this handler forwards to https://YOUR_PROJECT.supabase.co/functions/v1/deal-sourcer-scan
- * (avoids “Failed to fetch” when clients block or fail cross-origin requests to *.supabase.co).
- *
- * Env (Vercel project): same as the app — VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY,
- * or SUPABASE_URL + SUPABASE_ANON_KEY.
+ * Same-origin proxy for merchant-welcome-whatsapp Edge Function (Vercel).
+ * Env: VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (or SUPABASE_*).
  */
 
 const proc = typeof globalThis !== "undefined" ? globalThis.process : undefined;
@@ -22,15 +17,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const supabaseUrl = String(proc?.env?.VITE_SUPABASE_URL || proc?.env?.SUPABASE_URL || "").replace(
-    /\/$/,
-    "",
-  );
+  const supabaseUrl = String(proc?.env?.VITE_SUPABASE_URL || proc?.env?.SUPABASE_URL || "").replace(/\/$/, "");
   const anonKey = proc?.env?.VITE_SUPABASE_ANON_KEY || proc?.env?.SUPABASE_ANON_KEY || "";
   if (!supabaseUrl || !anonKey) {
     return res.status(500).json({
-      error:
-        "Server missing Supabase env. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or SUPABASE_*) on Vercel for this project.",
+      error: "Server missing Supabase env for function proxy.",
     });
   }
 
@@ -45,7 +36,7 @@ export default async function handler(req, res) {
     }
   }
 
-  const target = `${supabaseUrl}/functions/v1/deal-sourcer-scan`;
+  const target = `${supabaseUrl}/functions/v1/merchant-welcome-whatsapp`;
   try {
     const upstream = await fetch(target, {
       method: "POST",
