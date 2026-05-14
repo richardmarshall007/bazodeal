@@ -39,6 +39,20 @@ function readInitialJoinMerchantId() {
   return null;
 }
 
+/** Extra sentence for signup/login toast after merchant-welcome-whatsapp Edge Function. */
+function whatsappJoinSuffix(whatsapp) {
+  if (!whatsapp) return "";
+  if (whatsapp === "sent") return " Check WhatsApp for a short welcome from Bazodeal.";
+  if (whatsapp === "skipped_twilio") {
+    return " WhatsApp is not configured on the server — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_FROM on the merchant-welcome-whatsapp function and redeploy.";
+  }
+  if (whatsapp === "skipped_phone") {
+    return " WhatsApp was skipped — use a valid mobile (Trinidad: +18681234567).";
+  }
+  if (whatsapp === "error") return " WhatsApp could not be sent — check the browser console and Twilio.";
+  return "";
+}
+
 const finalPrice = d => +(+d.retail_price * (1 - +d.discount_pct / 100)).toFixed(2);
 const savings    = d => +(+d.retail_price - finalPrice(d)).toFixed(2);
 const fmt        = n => `TT$${Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
@@ -809,6 +823,9 @@ export default function Bazodeal() {
   const [qrInviteMerchantName, setQrInviteMerchantName] = useState("");
   const [followedMerchants, setFollowedMerchants] = useState([]);
   const [merchantJoinQrDataUrl, setMerchantJoinQrDataUrl] = useState("");
+  const [waInviteLink, setWaInviteLink] = useState("");
+  const [waInviteQrDataUrl, setWaInviteQrDataUrl] = useState("");
+  const [waInviteBusy, setWaInviteBusy] = useState(false);
   const qrRegisterAutoOpened = useRef(false);
 
   // ── Helpers ──────────────────────────────────────────────
@@ -1025,13 +1042,18 @@ export default function Bazodeal() {
     } catch { /* noop */ }
   }, []);
 
-  const tryInvokeMerchantWhatsapp = async (merchantId) => {
-    if (!merchantId) return;
+  const tryInvokeMerchantWhatsapp = async (merchantId, accessTokenOverride) => {
+    if (!merchantId) return null;
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) return;
+      let token = typeof accessTokenOverride === "string" && accessTokenOverride.trim()
+        ? accessTokenOverride.trim()
+        : null;
+      if (!token) {
+        const { data: { session } } = await supabase.auth.getSession();
+        token = session?.access_token || null;
+      }
+      if (!token) return null;
       const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const token = session.access_token;
       const body = { merchant_id: merchantId };
       let { data, error } = await supabase.functions.invoke("merchant-welcome-whatsapp", {
         body,
@@ -1067,17 +1089,24 @@ export default function Bazodeal() {
       }
       if (error) {
         console.warn("merchant-welcome-whatsapp:", error.message || error);
-        return;
+        return "error";
       }
-      if (data?.sent) {
-        /* Main welcome toast already shown from signup/login. */
+      if (data?.sent) return "sent";
+      if (data?.skipped && data?.reason) {
+        const r = data.reason;
+        if (r === "twilio_not_configured") return "skipped_twilio";
+        if (r === "no_phone" || r === "invalid_phone") return "skipped_phone";
+        if (r === "self") return "skipped_self";
+        return "skipped_other";
       }
+      return null;
     } catch (e) {
       console.warn("merchant-welcome-whatsapp", e);
+      return "error";
     }
   };
 
-  const completeMerchantJoin = async (userId, { whatsappOptIn }) => {
+  const completeMerchantJoin = async (userId, { whatsappOptIn, accessToken } = {}) => {
     let stored = null;
     try {
       stored = sessionStorage.getItem(QR_MERCHANT_STORAGE);
@@ -1111,11 +1140,14 @@ export default function Bazodeal() {
       return null;
     }
     await fetchMerchantFollows(userId);
-    if (!alreadyFollowing && Boolean(whatsappOptIn)) await tryInvokeMerchantWhatsapp(mid);
+    let whatsappStatus = null;
+    if (!alreadyFollowing && Boolean(whatsappOptIn)) {
+      whatsappStatus = await tryInvokeMerchantWhatsapp(mid, accessToken);
+    }
     const storeName = mp.name || "this store";
     clearJoinMerchantTracking();
     qrRegisterAutoOpened.current = false;
-    return storeName;
+    return { storeName, whatsapp: whatsappStatus };
   };
 
   useEffect(() => {
@@ -1414,8 +1446,13 @@ export default function Bazodeal() {
     const uid = authData?.user?.id;
     let welcome = "Welcome back! 🔥";
     if (uid) {
-      const store = await completeMerchantJoin(uid, { whatsappOptIn: true });
-      if (store) welcome = `Welcome back! You're now following ${store}.`;
+      const join = await completeMerchantJoin(uid, {
+        whatsappOptIn: true,
+        accessToken: authData?.session?.access_token,
+      });
+      if (join?.storeName) {
+        welcome = `Welcome back! You're now following ${join.storeName}.${whatsappJoinSuffix(join.whatsapp)}`;
+      }
     }
     pop(welcome);
   };
@@ -1443,13 +1480,16 @@ export default function Bazodeal() {
         if (!loginAttempt.error && loginAttempt.data?.user) {
           await ensureProfile(loginAttempt.data.user, { name, phone, dobMonth, dobYear, gender, interests });
           const uid = loginAttempt.data.user.id;
-          const followed = await completeMerchantJoin(uid, { whatsappOptIn });
+          const followed = await completeMerchantJoin(uid, {
+            whatsappOptIn,
+            accessToken: loginAttempt.data.session?.access_token,
+          });
           setPosting(false);
           setAuth(null);
           setRegF({ email:"", password:"", name:"", phone:"", dobMonth:"", dobYear:"", gender:"", interests:[], whatsappOptIn: true });
           pop(
-            followed
-              ? `Welcome back! You're now following ${followed}.`
+            followed?.storeName
+              ? `Welcome back! You're now following ${followed.storeName}.${whatsappJoinSuffix(followed.whatsapp)}`
               : "Welcome back! Account already existed, so we signed you in.",
           );
           return;
@@ -1473,12 +1513,19 @@ export default function Bazodeal() {
         setPosting(false);
         return;
       }
-      followedName = await completeMerchantJoin(data.user.id, { whatsappOptIn });
+      followedName = await completeMerchantJoin(data.user.id, {
+        whatsappOptIn,
+        accessToken: data.session?.access_token,
+      });
     }
     setPosting(false);
     setAuth(null);
     setRegF({ email:"", password:"", name:"", phone:"", dobMonth:"", dobYear:"", gender:"", interests:[], whatsappOptIn: true });
-    pop(followedName ? `You're in! You're following ${followedName}.` : "You're in! Welcome to Bazodeal 🎉");
+    pop(
+      followedName?.storeName
+        ? `You're in! You're following ${followedName.storeName}.${whatsappJoinSuffix(followedName.whatsapp)}`
+        : "You're in! Welcome to Bazodeal 🎉",
+    );
   };
 
   const doLogout = async () => {
@@ -2075,6 +2122,71 @@ export default function Bazodeal() {
       cancelled = true;
     };
   }, [view, currentUser?.id, canPostDeals]);
+
+  useEffect(() => {
+    if (view !== "merchant" || !canPostDeals) {
+      setWaInviteLink("");
+      setWaInviteQrDataUrl("");
+    }
+  }, [view, canPostDeals]);
+
+  useEffect(() => {
+    if (!waInviteLink) {
+      setWaInviteQrDataUrl("");
+      return;
+    }
+    let cancelled = false;
+    import("qrcode")
+      .then((QR) =>
+        QR.default.toDataURL(waInviteLink, { width: 220, margin: 2, color: { dark: "#111111", light: "#ffffff" } }),
+      )
+      .then((url) => {
+        if (!cancelled) setWaInviteQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setWaInviteQrDataUrl("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [waInviteLink]);
+
+  const createMerchantWaInvite = useCallback(async (silent = false) => {
+    if (!currentUser) return;
+    if (!silent) setWaInviteBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("merchant-whatsapp-invite", { body: {} });
+      if (error) {
+        if (!silent) pop(error.message || "Could not create WhatsApp signup link.", "error");
+        else waInviteAutoFetched.current = false;
+        return;
+      }
+      if (data?.waLink) {
+        setWaInviteLink(data.waLink);
+        if (!silent) pop("WhatsApp signup link is ready.", "success");
+      } else if (!silent) {
+        pop(data?.error || "WhatsApp invite failed.", "error");
+      } else {
+        waInviteAutoFetched.current = false;
+      }
+    } catch (e) {
+      if (!silent) pop(e?.message || "WhatsApp invite failed.", "error");
+      else waInviteAutoFetched.current = false;
+    } finally {
+      if (!silent) setWaInviteBusy(false);
+    }
+  }, [currentUser, pop]);
+
+  const waInviteAutoFetched = useRef(false);
+  useEffect(() => {
+    if (view !== "merchant" || !canPostDeals || !currentUser?.id) {
+      waInviteAutoFetched.current = false;
+      return;
+    }
+    if (waInviteLink || waInviteAutoFetched.current) return;
+    waInviteAutoFetched.current = true;
+    void createMerchantWaInvite(true);
+  }, [view, canPostDeals, currentUser?.id, waInviteLink, createMerchantWaInvite]);
 
   const DealCardImage = ({ deal }) => {
     const cover = dealCoverUrl(deal);
@@ -2901,10 +3013,86 @@ export default function Bazodeal() {
               }}
             >
               <h3 style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 1, marginBottom: 8 }}>
-                Your store signup &amp; QR
+                WhatsApp-first signup
+              </h3>
+              <p style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.5, marginBottom: 12 }}>
+                Customers scan a QR that opens <strong>WhatsApp</strong> with <code style={{ fontSize: 11 }}>JOIN …</code> pre-filled. They reply with email and name; Bazodeal creates their account and follows your store. Point Twilio &quot;When a message comes in&quot; at the{" "}
+                <code style={{ fontSize: 11 }}>twilio-whatsapp-inbound</code> function (see{" "}
+                <code style={{ fontSize: 11 }}>scripts/migration-whatsapp-first-signup.sql</code>
+                ).
+              </p>
+              <button
+                type="button"
+                className="btn btn-gold btn-sm"
+                style={{ marginBottom: 14 }}
+                disabled={waInviteBusy}
+                onClick={() => void createMerchantWaInvite()}
+              >
+                {waInviteBusy ? "Refreshing…" : "Refresh WhatsApp link & QR"}
+              </button>
+              {waInviteLink ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-start" }}>
+                  {waInviteQrDataUrl ? (
+                    <a href={waInviteLink} target="_blank" rel="noopener noreferrer" title="Open WhatsApp">
+                      <img
+                        src={waInviteQrDataUrl}
+                        alt="Scan to open WhatsApp with JOIN code"
+                        width={220}
+                        height={220}
+                        style={{ borderRadius: 12, border: "1px solid var(--border2)", display: "block" }}
+                      />
+                    </a>
+                  ) : (
+                    <div
+                      style={{
+                        width: 220,
+                        height: 220,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "var(--bg3)",
+                        borderRadius: 12,
+                        fontSize: 12,
+                        color: "var(--text3)",
+                      }}
+                    >
+                      Building QR…
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>
+                      WhatsApp link
+                    </div>
+                    <input readOnly className="inp" style={{ marginTop: 6, fontSize: 12 }} value={waInviteLink} />
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+                      <a className="btn btn-pri btn-sm" href={waInviteLink} target="_blank" rel="noopener noreferrer">
+                        Open in WhatsApp
+                      </a>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(waInviteLink).then(() => pop("Copied")).catch(() => pop("Could not copy.", "error"));
+                        }}
+                      >
+                        Copy wa.me link
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 0 }}>
+                  Loading WhatsApp link… If this stays blank, deploy <code style={{ fontSize: 11 }}>merchant-whatsapp-invite</code> and set <code style={{ fontSize: 11 }}>TWILIO_WHATSAPP_FROM</code> on the function, then refresh.
+                </p>
+              )}
+              <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "22px 0 18px" }} />
+              <h3 style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 1, marginBottom: 8 }}>
+                Website signup &amp; QR
               </h3>
               <p style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.5, marginBottom: 14 }}>
-                Print or display this QR so shoppers open Bazodeal with your store ID. They create a free account, follow you here, and can get a one-time WhatsApp welcome when Twilio WhatsApp is configured on Supabase.
+                Shoppers open Bazodeal in the browser with your store ID, create a free account, and follow you here. Optional one-time WhatsApp welcome if{" "}
+                <code style={{ fontSize: 11, color: "var(--text2)" }}>merchant-welcome-whatsapp</code>
+                {" "}is deployed with Twilio secrets.
               </p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-start" }}>
                 {merchantJoinQrDataUrl ? (
@@ -2953,6 +3141,9 @@ export default function Bazodeal() {
                   >
                     Copy link
                   </button>
+                  <p style={{ fontSize: 12, color: "var(--text3)", marginTop: 10, lineHeight: 1.45 }}>
+                    This is your <strong>website</strong> join URL only — it does <strong>not</strong> open WhatsApp. For WhatsApp signup, use the <strong>wa.me</strong> link in the &quot;WhatsApp-first signup&quot; section above.
+                  </p>
                 </div>
               </div>
             </div>
@@ -2961,6 +3152,9 @@ export default function Bazodeal() {
             <div className="posting-gate">
               Posting is turned off for new accounts until an admin reviews and approves you. This helps keep Bazodeal free of spam and inappropriate listings.
               You can still browse deals, save favourites, and use your cart. If you need access, contact support or message the site admin.
+              <p style={{ marginTop: 14, fontSize: 13, fontWeight: 700, color: "var(--text2)", lineHeight: 1.45 }}>
+                <strong>WhatsApp-first signup QR</strong> (wa.me + <code style={{ fontSize: 11 }}>JOIN</code> code) appears above once an admin enables posting for your account — same place as your website join QR.
+              </p>
             </div>
           ) : (
             <DealForm
@@ -3199,7 +3393,7 @@ export default function Bazodeal() {
                 onChange={e => setRegF(p => ({ ...p, password: e.target.value }))} />
             </div>
             <div className="fg"><label>Phone Number{qrInviteMerchantId && regF.whatsappOptIn ? " *" : ""}</label>
-              <input className="inp" type="tel" placeholder="e.g. +18681234567 or 868-123-4567" value={regF.phone}
+              <input className="inp" type="tel" placeholder="e.g. +18681234567 (Trinidad) or +1…" value={regF.phone}
                 onChange={e => setRegF(p => ({ ...p, phone: e.target.value }))} />
             </div>
             {qrInviteMerchantId && (

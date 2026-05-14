@@ -1,8 +1,9 @@
 // Sends a one-time WhatsApp welcome after a customer joins via a merchant QR (Twilio).
-// Secrets (Supabase Edge Function): TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM (e.g. whatsapp:+14155238886)
+// Secrets (Supabase Edge Function): TWILIO_*; service access via SUPABASE_SECRET_KEYS or legacy SUPABASE_SERVICE_ROLE_KEY.
 // If Twilio is not configured, returns { ok: true, skipped: true } so signup never fails.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { getServiceRoleKey } from "../_shared/serviceRoleKey.ts";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -17,11 +18,17 @@ function normalizeWhatsAppE164(raw: string): string | null {
   if (!s) return null;
   if (s.startsWith("+")) {
     const rest = s.slice(1).replace(/\D/g, "");
-    return rest.length >= 10 ? `+${rest}` : null;
+    if (rest.length < 10) return null;
+    // Trinidad & Tobago (NANP): +1 868 xxx xxxx — never use +868… (invalid CC).
+    if (rest.length === 11 && rest.startsWith("1868")) return `+${rest}`;
+    if (rest.length === 10 && rest.startsWith("868")) return `+1${rest}`;
+    return `+${rest}`;
   }
   const digits = s.replace(/\D/g, "");
-  if (digits.length === 10 && digits.startsWith("868")) return `+${digits}`;
+  // 10-digit 868… is local TT format under country code 1.
+  if (digits.length === 10 && digits.startsWith("868")) return `+1${digits}`;
   if (digits.length === 10) return `+1${digits}`; // fallback NA
+  if (digits.length === 11 && digits.startsWith("1868")) return `+${digits}`;
   if (digits.length >= 10 && digits.length <= 15) return `+${digits}`;
   return null;
 }
@@ -103,7 +110,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const serviceKey = getServiceRoleKey();
   let storeName = "this store on Bazodeal";
   if (serviceKey) {
     const svc = createClient(supabaseUrl, serviceKey);

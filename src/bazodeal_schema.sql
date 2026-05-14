@@ -115,6 +115,28 @@ CREATE TABLE IF NOT EXISTS merchant_follows (
 CREATE INDEX IF NOT EXISTS merchant_follows_follower_idx ON merchant_follows (follower_id);
 CREATE INDEX IF NOT EXISTS merchant_follows_merchant_idx ON merchant_follows (merchant_id);
 
+-- WhatsApp-first signup (Twilio inbound → admin user + follow); no direct client access.
+CREATE TABLE IF NOT EXISTS merchant_whatsapp_invites (
+  code         TEXT PRIMARY KEY,
+  merchant_id  UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS whatsapp_signup_states (
+  phone_e164      TEXT PRIMARY KEY,
+  merchant_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  step            SMALLINT NOT NULL DEFAULT 1,
+  pending_email   TEXT,
+  pending_name    TEXT,
+  created_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS whatsapp_signup_states_merchant_idx ON whatsapp_signup_states (merchant_id);
+CREATE INDEX IF NOT EXISTS merchant_whatsapp_invites_merchant_idx ON merchant_whatsapp_invites (merchant_id);
+ALTER TABLE merchant_whatsapp_invites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE whatsapp_signup_states ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "merchant_whatsapp_invites_no_client" ON merchant_whatsapp_invites FOR ALL USING (false) WITH CHECK (false);
+CREATE POLICY "whatsapp_signup_states_no_client" ON whatsapp_signup_states FOR ALL USING (false) WITH CHECK (false);
+
 -- Events (community / store calendar — same posting gate as deals: admin or can_post_deals)
 CREATE TABLE IF NOT EXISTS events (
   id              UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,

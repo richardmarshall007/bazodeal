@@ -1,16 +1,17 @@
 // Stripe webhook: on successful Checkout, create order + line items and clear cart.
-// Secrets: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, SUPABASE_SERVICE_ROLE_KEY (auto in hosted Supabase)
+// Secrets: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, SUPABASE_SECRET_KEYS (preferred) or SUPABASE_SERVICE_ROLE_KEY (legacy)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import Stripe from "https://esm.sh/stripe@14.25.0?target=deno";
+import { getServiceRoleKey } from "../_shared/serviceRoleKey.ts";
 
 Deno.serve(async (req) => {
   const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
   const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const serviceKey = getServiceRoleKey();
 
-  if (!stripeKey || !webhookSecret) {
+  if (!stripeKey || !webhookSecret || !serviceKey) {
     return new Response("Server misconfigured", { status: 500 });
   }
 

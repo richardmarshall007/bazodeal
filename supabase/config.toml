@@ -3,3 +3,7 @@
 
 [functions.stripe-webhook]
 verify_jwt = false
+
+# Twilio posts form bodies — no Supabase JWT.
+[functions.twilio-whatsapp-inbound]
+verify_jwt = false
