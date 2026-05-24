@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import { supabase } from "./lib/supabaseClient";
-import bazodealLogo from "./assets/bazodeal-logo-brand.png";
+import bazodealLogo from "./assets/bazodeal.png";
 
 // ── Constants ────────────────────────────────────────────────
 const INTERESTS  = ["Electronics","Fashion","Home & Garden","Sports","Beauty","Travel","Food & Drink","Toys","Books","Automotive","Health","Jewellery","Outdoors","Gaming","Pets"];
@@ -316,7 +316,7 @@ body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden}
 
 .hdr{position:sticky;top:0;z-index:200;background:rgba(8,7,10,.88);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,61,0,.35);box-shadow:0 1px 0 rgba(255,208,0,.08);min-height:48px;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 14px}
 .logo{display:flex;align-items:center;cursor:pointer;user-select:none;line-height:0;flex-shrink:0}
-.logo img{display:block;height:clamp(92px,14vw,168px);width:auto;max-width:min(78vw,560px);object-fit:contain}
+.logo img{display:block;height:clamp(72px,11vw,128px);width:auto;max-width:min(72vw,420px);object-fit:contain}
 .nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;min-width:0}
 .nav-filter-select{width:auto;min-width:min(112px,28vw);max-width:min(44vw,200px);margin:0;padding:6px 28px 6px 10px;font-size:12px;font-weight:700;line-height:1.2}
 
@@ -826,6 +826,8 @@ export default function Bazodeal() {
   const [waInviteLink, setWaInviteLink] = useState("");
   const [waInviteQrDataUrl, setWaInviteQrDataUrl] = useState("");
   const [waInviteBusy, setWaInviteBusy] = useState(false);
+  /** True while merchant-whatsapp-invite is in flight (including silent auto-fetch). */
+  const [waInviteFetchPending, setWaInviteFetchPending] = useState(false);
   const qrRegisterAutoOpened = useRef(false);
 
   // ── Helpers ──────────────────────────────────────────────
@@ -2154,6 +2156,7 @@ export default function Bazodeal() {
   const createMerchantWaInvite = useCallback(async (silent = false) => {
     if (!currentUser) return;
     if (!silent) setWaInviteBusy(true);
+    setWaInviteFetchPending(true);
     try {
       const { data, error } = await supabase.functions.invoke("merchant-whatsapp-invite", { body: {} });
       if (error) {
@@ -2173,6 +2176,7 @@ export default function Bazodeal() {
       if (!silent) pop(e?.message || "WhatsApp invite failed.", "error");
       else waInviteAutoFetched.current = false;
     } finally {
+      setWaInviteFetchPending(false);
       if (!silent) setWaInviteBusy(false);
     }
   }, [currentUser, pop]);
@@ -3030,9 +3034,21 @@ export default function Bazodeal() {
               >
                 {waInviteBusy ? "Refreshing…" : "Refresh WhatsApp link & QR"}
               </button>
-              {waInviteLink ? (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-start" }}>
-                  {waInviteQrDataUrl ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-start" }}>
+                <div style={{ flexShrink: 0, width: 220 }}>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      color: "var(--gold)",
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                      marginBottom: 6,
+                    }}
+                  >
+                    Scan to sign up (WhatsApp)
+                  </div>
+                  {waInviteLink && waInviteQrDataUrl ? (
                     <a href={waInviteLink} target="_blank" rel="noopener noreferrer" title="Open WhatsApp">
                       <img
                         src={waInviteQrDataUrl}
@@ -3042,7 +3058,7 @@ export default function Bazodeal() {
                         style={{ borderRadius: 12, border: "1px solid var(--border2)", display: "block" }}
                       />
                     </a>
-                  ) : (
+                  ) : waInviteLink ? (
                     <div
                       style={{
                         width: 220,
@@ -3052,39 +3068,77 @@ export default function Bazodeal() {
                         justifyContent: "center",
                         background: "var(--bg3)",
                         borderRadius: 12,
+                        border: "1px dashed var(--border2)",
                         fontSize: 12,
                         color: "var(--text3)",
+                        textAlign: "center",
+                        padding: 12,
                       }}
                     >
                       Building QR…
                     </div>
+                  ) : (
+                    <div
+                      style={{
+                        width: 220,
+                        height: 220,
+                        boxSizing: "border-box",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "var(--bg3)",
+                        borderRadius: 12,
+                        border: "2px dashed var(--border2)",
+                        fontSize: 12,
+                        color: "var(--text3)",
+                        textAlign: "center",
+                        padding: 14,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, color: "var(--text2)", marginBottom: 8, fontSize: 13 }}>WhatsApp signup QR</span>
+                      {waInviteFetchPending ? (
+                        <span>Fetching your invite link…</span>
+                      ) : (
+                        <span>
+                          Your scannable QR appears here as soon as the wa.me link is ready. If nothing loads, deploy{" "}
+                          <code style={{ fontSize: 10 }}>merchant-whatsapp-invite</code> and set{" "}
+                          <code style={{ fontSize: 10 }}>TWILIO_WHATSAPP_FROM</code>, then tap refresh.
+                        </span>
+                      )}
+                    </div>
                   )}
-                  <div style={{ flex: 1, minWidth: 200 }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>
-                      WhatsApp link
-                    </div>
-                    <input readOnly className="inp" style={{ marginTop: 6, fontSize: 12 }} value={waInviteLink} />
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
-                      <a className="btn btn-pri btn-sm" href={waInviteLink} target="_blank" rel="noopener noreferrer">
-                        Open in WhatsApp
-                      </a>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => {
-                          void navigator.clipboard.writeText(waInviteLink).then(() => pop("Copied")).catch(() => pop("Could not copy.", "error"));
-                        }}
-                      >
-                        Copy wa.me link
-                      </button>
-                    </div>
-                  </div>
                 </div>
-              ) : (
-                <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 0 }}>
-                  Loading WhatsApp link… If this stays blank, deploy <code style={{ fontSize: 11 }}>merchant-whatsapp-invite</code> and set <code style={{ fontSize: 11 }}>TWILIO_WHATSAPP_FROM</code> on the function, then refresh.
-                </p>
-              )}
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  {waInviteLink ? (
+                    <>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "var(--gold)", textTransform: "uppercase", letterSpacing: 1 }}>
+                        WhatsApp link
+                      </div>
+                      <input readOnly className="inp" style={{ marginTop: 6, fontSize: 12 }} value={waInviteLink} />
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+                        <a className="btn btn-pri btn-sm" href={waInviteLink} target="_blank" rel="noopener noreferrer">
+                          Open in WhatsApp
+                        </a>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => {
+                            void navigator.clipboard.writeText(waInviteLink).then(() => pop("Copied")).catch(() => pop("Could not copy.", "error"));
+                          }}
+                        >
+                          Copy wa.me link
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p style={{ fontSize: 12, color: "var(--text3)", marginBottom: 0, lineHeight: 1.55 }}>
+                      <strong style={{ color: "var(--text2)" }}>Invite link</strong> loads in the background (or when you tap refresh). When it succeeds, the QR on the left encodes the same wa.me URL so customers can scan instead of tapping.
+                    </p>
+                  )}
+                </div>
+              </div>
               <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "22px 0 18px" }} />
               <h3 style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 1, marginBottom: 8 }}>
                 Website signup &amp; QR
