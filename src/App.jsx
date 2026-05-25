@@ -314,16 +314,17 @@ const CSS = `
   --text:#F0EAF8;--text2:#9A8FB0;--text3:#5A5070;
   --radius:10px;--radius-lg:18px;--radius-xl:24px;
 }
-html,body,#root{min-height:100vh;background:var(--bg)}
-body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden}
+html,body,#root{min-height:100vh;background:var(--bg);width:100%;max-width:100%;overflow-x:hidden;overscroll-behavior-x:none}
+body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.bazodeal-app{width:100%;max-width:100%;overflow-x:hidden;position:relative}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--flame-orange),var(--flame-amber));border-radius:4px;opacity:.55}
 
-.hdr{position:sticky;top:0;z-index:200;background:rgba(8,7,10,.88);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,61,0,.35);box-shadow:0 1px 0 rgba(255,208,0,.08);min-height:48px;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 14px}
-.logo{display:flex;align-items:center;cursor:pointer;user-select:none;line-height:0;flex-shrink:0}
+.hdr{position:sticky;top:0;z-index:200;background:rgba(8,7,10,.88);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,61,0,.35);box-shadow:0 1px 0 rgba(255,208,0,.08);min-height:48px;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 14px;width:100%;max-width:100%;box-sizing:border-box}
+.logo{display:flex;align-items:center;cursor:pointer;user-select:none;line-height:0;flex-shrink:0;max-width:100%}
 .logo img{display:block;height:clamp(72px,11vw,128px);width:auto;max-width:min(72vw,420px);object-fit:contain}
-.nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;min-width:0}
+.nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex:1 1 auto;min-width:0;max-width:100%}
 .nav-filter-select{width:auto;min-width:min(112px,28vw);max-width:min(44vw,200px);margin:0;padding:6px 28px 6px 10px;font-size:12px;font-weight:700;line-height:1.2}
 
 .btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-family:'Nunito Sans';font-weight:700;font-size:13px;letter-spacing:.4px;transition:all .18s;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
@@ -341,19 +342,19 @@ body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden}
 
 .ticker{background:linear-gradient(90deg,var(--flame-yellow),var(--flame-orange),var(--flame-amber),var(--flame-orange),var(--flame-yellow));padding:7px 0;overflow:hidden;white-space:nowrap;box-shadow:0 4px 24px rgba(255,61,0,.15)}
 .ticker-inner{display:inline-block;animation:tick 35s linear infinite;font-size:12px;font-weight:700;letter-spacing:1.5px;color:#fff;text-transform:uppercase}
-@keyframes tick{from{transform:translateX(100vw)}to{transform:translateX(-100%)}}
+@keyframes tick{from{transform:translateX(100%)}to{transform:translateX(-100%)}}
 
-.hero{padding:28px 24px 28px;text-align:center;background:radial-gradient(ellipse 65% 45% at 50% -10%,rgba(255,208,0,.14) 0%,rgba(255,61,0,.1) 38%,transparent 72%)}
+.hero{padding:28px 24px 28px;text-align:center;background:radial-gradient(ellipse 65% 45% at 50% -10%,rgba(255,208,0,.14) 0%,rgba(255,61,0,.1) 38%,transparent 72%);width:100%;max-width:100%;box-sizing:border-box;overflow-x:hidden}
 .hero h1{font-family:'Bebas Neue';font-size:clamp(52px,9vw,108px);letter-spacing:5px;line-height:.95;color:var(--text)}
 .hero h1 em{background:linear-gradient(105deg,var(--flame-yellow),#fff4b0,var(--flame-orange));-webkit-background-clip:text;background-clip:text;color:transparent;font-style:normal;display:block}
 .hero p{color:var(--text2);font-size:15px;margin-top:14px;max-width:420px;margin-inline:auto;line-height:1.6}
-.hero-spotlight-wrap{display:flex;justify-content:center;margin:0 auto 20px;width:100%;max-width:1000px;padding:0 4px}
-.hero-spotlight{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;display:flex;width:100%;align-items:stretch;text-align:left;box-shadow:0 16px 48px rgba(0,0,0,.35);transition:border .22s}
+.hero-spotlight-wrap{display:flex;justify-content:center;margin:0 auto 20px;width:100%;max-width:min(1000px,100%);padding:0 4px;box-sizing:border-box;overflow:hidden}
+.hero-spotlight{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;display:flex;width:100%;max-width:100%;align-items:stretch;text-align:left;box-shadow:0 16px 48px rgba(0,0,0,.35);transition:border .22s;min-width:0}
 .hero-spotlight:hover{border-color:rgba(255,61,0,.35)}
-.hero-spotlight-img{flex:1 1 min(520px,58%);min-width:0;background:var(--bg2);position:relative;display:flex;align-items:center;justify-content:center;align-self:auto;aspect-ratio:4/3;min-height:min(320px,50vw)}
+.hero-spotlight-img{flex:1 1 min(520px,58%);min-width:0;max-width:100%;background:var(--bg2);position:relative;display:flex;align-items:center;justify-content:center;align-self:auto;aspect-ratio:4/3;min-height:min(320px,50vw)}
 .hero-slide-today{position:absolute;top:12px;left:12px;z-index:3;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;background:rgba(255,184,0,.2);color:var(--gold);border:1px solid rgba(255,184,0,.35);padding:5px 10px;border-radius:8px;backdrop-filter:blur(6px)}
 .hero-spotlight-img img{width:100%;height:100%;object-fit:contain;object-position:center;display:block}
-.hero-spotlight-body{padding:14px 16px 18px;flex:0 0 min(284px,32%);display:flex;flex-direction:column;gap:8px;border-left:1px solid var(--border);justify-content:flex-start}
+.hero-spotlight-body{padding:14px 16px 18px;flex:0 1 min(284px,32%);min-width:0;max-width:100%;display:flex;flex-direction:column;gap:8px;border-left:1px solid var(--border);justify-content:flex-start;box-sizing:border-box}
 .hero-spot-pricing{margin-top:4px;margin-bottom:0;padding-top:10px}
 .hero-spotlight-actions{margin-top:auto;padding-top:10px}
 .hero-spotlight-k{font-size:10px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:-2px}
@@ -366,12 +367,15 @@ body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden}
 .hero-spotlight .final-price{font-size:26px;line-height:1}
 .hero-spotlight .retail-price{font-size:11px}
 .hero-spotlight .savings-tag{font-size:10px;line-height:1.3}
-.hero-carousel{position:relative;margin:0 auto}
-.hero-carousel-hoverzone:hover .hero-carousel-nav{opacity:1}
-.hero-carousel-viewport{overflow:hidden;border-radius:var(--radius-xl)}
-.hero-carousel-track{display:flex;width:100%;transition:transform 0.65s cubic-bezier(0.4, 0.1, 0.2, 1)}
-.hero-carousel-slide{flex:0 0 100%;width:100%;min-width:0}
-.hero-carousel-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:4;width:40px;height:40px;border-radius:50%;border:1px solid var(--border2);background:rgba(8,7,10,.82);color:var(--text);font-size:20px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity .2s;border:none;opacity:0}
+.hero-carousel{position:relative;margin:0 auto;width:100%;max-width:min(1000px,100%);box-sizing:border-box}
+@media (hover:hover) and (pointer:fine){
+  .hero-carousel-nav{opacity:0}
+  .hero-carousel-hoverzone:hover .hero-carousel-nav{opacity:1}
+}
+.hero-carousel-viewport{overflow:hidden;border-radius:var(--radius-xl);width:100%;max-width:100%;touch-action:pan-y pinch-zoom;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.hero-carousel-track{display:flex;width:100%;transition:transform 0.65s cubic-bezier(0.4, 0.1, 0.2, 1);will-change:transform}
+.hero-carousel-slide{flex:0 0 100%;width:100%;min-width:0;max-width:100%;box-sizing:border-box}
+.hero-carousel-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:4;width:40px;height:40px;border-radius:50%;border:1px solid var(--border2);background:rgba(8,7,10,.82);color:var(--text);font-size:20px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity .2s;border:none;opacity:.92}
 .hero-carousel-nav:hover{background:rgba(255,61,0,.35);border-color:var(--primary)}
 .hero-carousel-prev{left:8px}
 .hero-carousel-next{right:8px}
@@ -386,10 +390,27 @@ body{font-family:'Nunito Sans',sans-serif;color:var(--text);overflow-x:hidden}
 .radio-nav-wrap{display:flex;align-items:center;gap:6px;flex-shrink:0}
 .radio-page-link{font-size:11px;font-weight:700;color:var(--text3);padding:6px 8px;text-decoration:none;border-radius:8px;white-space:nowrap}
 .radio-page-link:hover{color:var(--gold)}
-@media (max-width:640px){
+@media (max-width:768px){
+  .hdr{flex-direction:column;align-items:stretch;padding:10px 12px}
+  .logo{align-self:center}
+  .logo img{height:clamp(48px,14vw,72px);max-width:min(88vw,280px)}
+  .nav{width:100%;justify-content:center;gap:8px}
+  .nav-filter-select{min-width:0;flex:1 1 calc(50% - 8px);max-width:100%}
+  .radio-nav-wrap{flex-wrap:wrap;justify-content:center}
+  .hero{padding:20px 12px 24px}
+  .hero-spotlight-wrap{padding:0}
   .hero-spotlight{flex-direction:column}
-  .hero-spotlight-img{flex:0 0 auto;width:100%;aspect-ratio:1/1;min-height:220px;border-bottom:1px solid var(--border)}
-  .hero-spotlight-body{flex:none;width:100%;max-width:none;border-left:none;padding:14px 16px}
+  .hero-spotlight-img{flex:0 0 auto;width:100%;max-width:100%;aspect-ratio:1/1;min-height:200px;border-bottom:1px solid var(--border)}
+  .hero-spotlight-body{flex:none;width:100%;max-width:100%;border-left:none;padding:14px 16px}
+  .hero-carousel-nav{width:36px;height:36px;font-size:18px}
+  .hero-carousel-prev{left:4px}
+  .hero-carousel-next{right:4px}
+  .hero-carousel-caption{font-size:11px;padding:0 4px}
+  .grid{padding:10px 12px 48px;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr))}
+}
+@media (max-width:480px){
+  .btn-sm{padding:6px 10px;font-size:11px}
+  .nav{gap:6px}
 }
 .hero-stats{display:flex;justify-content:center;gap:clamp(20px,4vw,48px);margin-top:12px;margin-bottom:8px;flex-wrap:wrap}
 .hero-stat{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:14px 16px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius-lg);min-width:min(154px,30vw)}
@@ -817,6 +838,7 @@ export default function Bazodeal() {
   const [dealDetail, setDealDetail] = useState(null);
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroCarouselPaused, setHeroCarouselPaused] = useState(false);
+  const heroTouchStartX = useRef(null);
   const [radioStreamPlaying, setRadioStreamPlaying] = useState(false);
   const radioAudioRef = useRef(null);
   const [loginF, setLoginF] = useState({ email:"", password:"" });
@@ -2236,8 +2258,23 @@ export default function Bazodeal() {
   );
 
   // ── Render ───────────────────────────────────────────────
+  const onHeroTouchStart = (e) => {
+    if (e.touches.length === 1) heroTouchStartX.current = e.touches[0].clientX;
+  };
+  const onHeroTouchEnd = (e) => {
+    const start = heroTouchStartX.current;
+    heroTouchStartX.current = null;
+    const n = featuredSlides.length;
+    if (start == null || n <= 1) return;
+    const dx = e.changedTouches[0].clientX - start;
+    if (Math.abs(dx) < 48) return;
+    setHeroCarouselPaused(true);
+    if (dx < 0) setHeroSlideIdx((i) => (i + 1) % n);
+    else setHeroSlideIdx((i) => (i - 1 + n) % n);
+  };
+
   return (
-    <div style={{ minHeight:"100vh", background:"var(--bg)" }} onClick={() => setDropdown(false)}>
+    <div className="bazodeal-app" style={{ minHeight:"100vh", background:"var(--bg)" }} onClick={() => setDropdown(false)}>
       <style>{CSS}</style>
 
       {/* HEADER */}
@@ -2440,6 +2477,8 @@ export default function Bazodeal() {
                 className="hero-carousel hero-carousel-hoverzone"
                 onMouseEnter={() => setHeroCarouselPaused(true)}
                 onMouseLeave={() => setHeroCarouselPaused(false)}
+                onTouchStart={onHeroTouchStart}
+                onTouchEnd={onHeroTouchEnd}
               >
                 <div className="hero-carousel-viewport">
                   <div className="hero-carousel-track" style={{ transform:`translateX(-${heroSlideIdx * 100}%)` }}>
