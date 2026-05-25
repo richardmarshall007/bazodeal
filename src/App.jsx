@@ -185,6 +185,12 @@ async function functionsHttpErrorUserMessage(error) {
   return `HTTP ${status}.${hint ? ` ${hint}` : ""} (Empty response body.)`;
 }
 const isDealActive = (deal) => !deal.expires_at || new Date(deal.expires_at).getTime() >= new Date().setHours(0, 0, 0, 0);
+const isDealPubliclyLive = (deal) => deal.approved === true && isDealActive(deal);
+const dealStatusLabel = (deal) => {
+  if (!deal.approved) return "Pending review";
+  if (isDealActive(deal)) return "Live";
+  return "Expired";
+};
 /** Calendar date in user's local TZ (YYYY-MM-DD) */
 const localDateKey = (iso) => {
   if (!iso) return "";
@@ -973,18 +979,39 @@ export default function Bazodeal() {
     async (userId, nextValue) => {
       setAdminPostingAuthId(userId);
       const { error } = await supabase.from("profiles").update({ can_post_deals: nextValue }).eq("id", userId);
-      setAdminPostingAuthId(null);
       if (error) {
+        setAdminPostingAuthId(null);
         pop("Could not update posting permission: " + error.message, "error");
         return;
       }
+      if (nextValue) {
+        const { error: dealErr } = await supabase
+          .from("deals")
+          .update({ approved: true })
+          .eq("merchant_id", userId)
+          .eq("approved", false);
+        if (dealErr) {
+          setAdminPostingAuthId(null);
+          pop("Posting enabled, but pending deals could not be published: " + dealErr.message, "error");
+          await fetchAllUsers();
+          if (currentUser?.id === userId) await fetchProfile(userId);
+          return;
+        }
+      }
+      setAdminPostingAuthId(null);
       await fetchAllUsers();
+      await fetchDeals();
       if (currentUser?.id === userId) {
         await fetchProfile(userId);
       }
-      pop(nextValue ? "This member can post deals." : "Posting permission revoked.", "success");
+      pop(
+        nextValue
+          ? "This member can post live deals. Any pending submissions are now public."
+          : "Posting permission revoked.",
+        "success",
+      );
     },
-    [fetchAllUsers, fetchProfile, currentUser?.id, pop],
+    [fetchAllUsers, fetchDeals, fetchProfile, currentUser?.id, pop],
   );
 
   const setUserConcurrentLimit = useCallback(
@@ -1582,14 +1609,9 @@ export default function Bazodeal() {
       pop("Deal price must be greater than zero and less than the retail price.", "error");
       return;
     }
-    if (!canPostDeals) {
-      pop("Your account is not approved to post deals yet. An admin must enable posting for your account first.", "error");
-      return;
-    }
-    
-    // Concurrency limit: non-admin merchants can only have up to `profiles.concurrent_deals_limit`
-    // active deals at a time (active = approved + not expired).
-    if (profile?.role !== "admin") {
+
+    // Concurrency limit applies only when posting live (approved) deals.
+    if (canPostDeals && profile?.role !== "admin") {
       const todayKey = todayLocalKey();
       const limit = Math.max(1, parseInt(profile?.concurrent_deals_limit ?? 1, 10) || 1);
       const { data: activeDeals, error: activeErr } = await supabase
@@ -1631,7 +1653,7 @@ export default function Bazodeal() {
       description,
       stock:      parseInt(stock) || 99,
       expires_at: expires || null,
-      approved:   true,
+      approved:   canPostDeals,
       image_url,
       image_urls,
     };
@@ -1648,7 +1670,7 @@ export default function Bazodeal() {
     }
     await fetchDeals();
     resetDealForm();
-    pop("Deal is live! ✅");
+    pop(canPostDeals ? "Deal is live! ✅" : "Deal submitted! It will go public once an admin enables posting for your account.");
   };
 
   const resetEventForm = () => {
@@ -1856,10 +1878,6 @@ export default function Bazodeal() {
 
   const postSelectedSourcerDeals = async () => {
     if (!currentUser || !profile) { setAuth("login"); return; }
-    if (!canPostDeals) {
-      pop("Your account is not approved to post deals yet. An admin must enable posting first.", "error");
-      return;
-    }
     const ids = [...sourcerSelected];
     if (ids.length === 0) { pop("Select at least one line to post.", "error"); return; }
 
@@ -1878,7 +1896,7 @@ export default function Bazodeal() {
       }
     }
 
-    if (profile.role !== "admin") {
+    if (canPostDeals && profile.role !== "admin") {
       const todayKey = todayLocalKey();
       const limit = Math.max(1, parseInt(profile?.concurrent_deals_limit ?? 1, 10) || 1);
       const { data: activeDeals, error: activeErr } = await supabase
@@ -1929,7 +1947,7 @@ export default function Bazodeal() {
         description: pieces.join("\n\n"),
         stock: 99,
         expires_at: null,
-        approved: true,
+        approved: canPostDeals,
         image_url: pulledImg,
         image_urls: pulledImg ? [pulledImg] : null,
       };
@@ -1949,7 +1967,11 @@ export default function Bazodeal() {
     await fetchDeals();
     setSourcerSelected(new Set());
     setSourcerDrafts({});
-    pop(posted === 1 ? "1 deal is now live under your account." : `${posted} deals are now live under your account.`);
+    pop(
+      canPostDeals
+        ? (posted === 1 ? "1 deal is now live under your account." : `${posted} deals are now live under your account.`)
+        : (posted === 1 ? "1 deal submitted for review." : `${posted} deals submitted — they go public when an admin enables posting.`),
+    );
     setView("merchant");
   };
 
@@ -2038,13 +2060,14 @@ export default function Bazodeal() {
   const cartTotal     = cart.reduce((s, i) => s + finalPrice(i.deal) * i.qty, 0);
   const cartCount     = cart.reduce((s, i) => s + i.qty, 0);
   const cartSavings   = cart.reduce((s, i) => s + savings(i.deal) * i.qty, 0);
-  const activeDeals   = deals.filter(isDealActive);
+  const activeDeals   = deals.filter(isDealPubliclyLive);
   const liveDeals     = activeDeals;
-  const expiredDeals  = deals.filter(d => !isDealActive(d));
+  const expiredDeals  = deals.filter(d => d.approved && !isDealActive(d));
+  const pendingDeals  = deals.filter(d => !d.approved);
   const merchantFilterOptions = useMemo(() => {
     const map = new Map();
     for (const d of deals) {
-      if (!isDealActive(d)) continue;
+      if (!isDealPubliclyLive(d)) continue;
       if (d.merchant_id && d.merchant_name) map.set(d.merchant_id, d.merchant_name);
     }
     return [...map.entries()].sort((a, b) =>
@@ -2104,7 +2127,7 @@ export default function Bazodeal() {
   }, [loading]);
 
   useEffect(() => {
-    if (view !== "merchant" || !currentUser?.id || !canPostDeals) {
+    if (view !== "merchant" || !currentUser?.id) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- hide QR when leaving merchant dashboard
       setMerchantJoinQrDataUrl("");
       return;
@@ -2123,7 +2146,7 @@ export default function Bazodeal() {
     return () => {
       cancelled = true;
     };
-  }, [view, currentUser?.id, canPostDeals]);
+  }, [view, currentUser?.id]);
 
   useEffect(() => {
     if (view !== "merchant" || !canPostDeals) {
@@ -2722,13 +2745,13 @@ export default function Bazodeal() {
               <div className="sourcer-actions">
                 {!canPostDeals && (
                   <p className="sourcer-note" style={{ marginBottom:10, width:"100%" }}>
-                    Your account is not approved to publish listings yet. Ask an admin to enable posting, or use the regular deal form once approved.
+                    You can submit selected rows now. They stay hidden from the public feed until an admin enables posting for your account.
                   </p>
                 )}
                 <button
                   type="button"
                   className="btn btn-gold btn-sm"
-                  disabled={posting || sourcerSelected.size === 0 || !canPostDeals}
+                  disabled={posting || sourcerSelected.size === 0}
                   onClick={() => postSelectedSourcerDeals()}
                 >
                   {posting ? "Posting…" : `Post selected (${sourcerSelected.size}) to Bazodeal`}
@@ -3203,27 +3226,22 @@ export default function Bazodeal() {
             </div>
           )}
           {!canPostDeals ? (
-            <div className="posting-gate">
-              Posting is turned off for new accounts until an admin reviews and approves you. This helps keep Bazodeal free of spam and inappropriate listings.
-              You can still browse deals, save favourites, and use your cart. If you need access, contact support or message the site admin.
-              <p style={{ marginTop: 14, fontSize: 13, fontWeight: 700, color: "var(--text2)", lineHeight: 1.45 }}>
-                <strong>WhatsApp-first signup QR</strong> (wa.me + <code style={{ fontSize: 11 }}>JOIN</code> code) appears above once an admin enables posting for your account — same place as your website join QR.
-              </p>
+            <div className="posting-gate" style={{ marginBottom: 18 }}>
+              You can submit deals and upload images now. Listings stay <strong>private</strong> until an admin taps <strong>Allow posting</strong> in the admin panel — then your pending deals go live on the site.
             </div>
-          ) : (
-            <DealForm
-              dealF={dealF}
-              setDealF={setDealF}
-              imagePreviews={imageDraftPreviews}
-              onImagesChange={handleDealImagesChange}
-              onRemoveImage={removeDealImageAt}
-              posting={posting}
-              onPost={postDeal}
-              title="New Deal Details"
-              btnLabel="Submit Deal 🔥"
-              btnClass="btn-pri"
-            />
-          )}
+          ) : null}
+          <DealForm
+            dealF={dealF}
+            setDealF={setDealF}
+            imagePreviews={imageDraftPreviews}
+            onImagesChange={handleDealImagesChange}
+            onRemoveImage={removeDealImageAt}
+            posting={posting}
+            onPost={postDeal}
+            title="New Deal Details"
+            btnLabel={canPostDeals ? "Submit Deal 🔥" : "Submit for review 🔥"}
+            btnClass="btn-pri"
+          />
           <h3 className="admin-list-title">My Submitted Deals</h3>
           <div className="admin-list">
             {deals.filter(d => d.merchant_id === currentUser.id).length === 0 ? (
@@ -3235,7 +3253,9 @@ export default function Bazodeal() {
                   <h4>{d.title}</h4>
                   <p>{fmt(d.retail_price)} → {fmt(finalPrice(d))} ({d.discount_pct}% OFF) · ❤️ {d.like_count}</p>
                 </div>
-                <span className={`badge ${isDealActive(d) ? "badge-live" : "badge-pend"}`}>{isDealActive(d) ? "Live" : "Expired"}</span>
+                <span className={`badge ${d.approved ? (isDealActive(d) ? "badge-live" : "badge-pend") : "badge-pend"}`}>
+                  {dealStatusLabel(d)}
+                </span>
               </div>
             ))}
           </div>
@@ -3258,7 +3278,7 @@ export default function Bazodeal() {
 
           <h3 className="admin-list-title">Who can post deals</h3>
           <p className="admin-members-hint">
-            New accounts cannot post until you <strong>Allow posting</strong> here. Admins can always post (no concurrent cap in the app). For other members, set <strong>max concurrent live deals</strong> so they can run more than one approved, non-expired listing at a time when allowed.
+            New members can <strong>submit deals and images</strong> right away; those deals stay hidden until you <strong>Allow posting</strong> (pending deals then go live). Admins can always post. Set <strong>max concurrent live deals</strong> for approved merchants.
           </p>
           <div className="admin-list admin-list-members">
             {allUsers.length === 0 ? (
@@ -3347,6 +3367,46 @@ export default function Bazodeal() {
             btnLabel="Upload Deal ✅"
             btnClass="btn-gold"
           />
+
+          <h3 className="admin-list-title">Pending approval ({pendingDeals.length})</h3>
+          <div className="admin-list" style={{ marginBottom: 24 }}>
+            {pendingDeals.length === 0 ? (
+              <div style={{ padding: 28, textAlign: "center", color: "var(--text2)", fontSize: 14 }}>No deals awaiting approval.</div>
+            ) : (
+              pendingDeals.map((d) => (
+                <div key={d.id} className="admin-row">
+                  <div className="admin-emo">{dealCoverUrl(d) ? <img src={dealCoverUrl(d)} alt={d.title} /> : d.emoji}</div>
+                  <div className="admin-info">
+                    <h4>{d.title}</h4>
+                    <p>by {d.merchant_name} · {fmt(d.retail_price)} → {fmt(finalPrice(d))} ({d.discount_pct}% OFF)</p>
+                  </div>
+                  <span className="badge badge-pend">Pending</span>
+                  <div className="admin-actions">
+                    <button
+                      type="button"
+                      className="btn btn-pri btn-sm"
+                      disabled={adminActionId === d.id}
+                      onClick={async () => {
+                        setAdminActionId(d.id);
+                        const { error } = await supabase.from("deals").update({ approved: true }).eq("id", d.id);
+                        setAdminActionId(null);
+                        if (error) pop("Could not approve deal: " + error.message, "error");
+                        else {
+                          await fetchDeals();
+                          pop("Deal is now live.", "success");
+                        }
+                      }}
+                    >
+                      {adminActionId === d.id ? "…" : "Approve"}
+                    </button>
+                    <button className="btn btn-red btn-sm" disabled={adminActionId === d.id} onClick={() => removeDeal(d.id)}>
+                      {adminActionId === d.id ? "Working…" : "Remove"}
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
 
           <h3 className="admin-list-title">Live Deals ({liveDeals.length})</h3>
           <div className="admin-list" style={{ marginBottom:24 }}>
