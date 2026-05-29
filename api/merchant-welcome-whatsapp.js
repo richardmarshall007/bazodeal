@@ -3,13 +3,13 @@
  * Env: VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (or SUPABASE_*).
  */
 
+import { applyApiCors } from "./_lib/cors.js";
+
 const proc = typeof globalThis !== "undefined" ? globalThis.process : undefined;
 
 export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "authorization, content-type, apikey");
-    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    applyApiCors(req, res);
     return res.status(204).end();
   }
 

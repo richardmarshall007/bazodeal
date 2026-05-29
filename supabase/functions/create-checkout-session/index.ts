@@ -4,24 +4,21 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import Stripe from "https://esm.sh/stripe@14.25.0?target=deno";
-
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 const finalPrice = (retail: number, discountPct: number) =>
   Math.round(retail * (1 - discountPct / 100) * 100) / 100;
 
 Deno.serve(async (req) => {
+  const cors = corsHeaders(req);
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { headers: cors });
   }
 
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -32,13 +29,13 @@ Deno.serve(async (req) => {
   if (!stripeKey) {
     return new Response(JSON.stringify({ error: "STRIPE_SECRET_KEY is not set on this project." }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
   if (!siteUrl) {
     return new Response(
       JSON.stringify({ error: "Set PUBLIC_SITE_URL (or SITE_URL) to your live site origin for Stripe redirects." }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
     );
   }
 
@@ -46,7 +43,7 @@ Deno.serve(async (req) => {
   if (!authHeader?.startsWith("Bearer ")) {
     return new Response(JSON.stringify({ error: "Missing Authorization header." }), {
       status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -63,7 +60,7 @@ Deno.serve(async (req) => {
   if (userErr || !user) {
     return new Response(JSON.stringify({ error: "Invalid or expired session." }), {
       status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -75,7 +72,7 @@ Deno.serve(async (req) => {
   if (cartErr) {
     return new Response(JSON.stringify({ error: cartErr.message }), {
       status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -83,7 +80,7 @@ Deno.serve(async (req) => {
   if (items.length === 0) {
     return new Response(JSON.stringify({ error: "Your cart is empty." }), {
       status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -102,13 +99,13 @@ Deno.serve(async (req) => {
     if (!Number.isFinite(retail) || retail <= 0 || !Number.isFinite(discountPct) || discountPct <= 0 || discountPct >= 100) {
       return new Response(JSON.stringify({ error: `Invalid pricing for “${title}”.` }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
     if (!d.approved) {
       return new Response(JSON.stringify({ error: `“${title}” is no longer available.` }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
     const expRaw = d.expires_at;
@@ -119,14 +116,14 @@ Deno.serve(async (req) => {
       if (!Number.isNaN(exp.getTime()) && exp.getTime() < start.getTime()) {
         return new Response(JSON.stringify({ error: `“${title}” has expired.` }), {
           status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         });
       }
     }
     if (Number.isFinite(stock) && stock < row.qty) {
       return new Response(JSON.stringify({ error: `Not enough stock for “${title}”.` }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -135,7 +132,7 @@ Deno.serve(async (req) => {
     if (unitCents < 50) {
       return new Response(JSON.stringify({ error: `Amount too small for “${title}” (Stripe minimums).` }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -168,13 +165,13 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({ url: session.url }), {
       status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return new Response(JSON.stringify({ error: msg }), {
       status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 });

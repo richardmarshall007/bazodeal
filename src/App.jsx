@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import { supabase } from "./lib/supabaseClient";
+import { clipText, sanitizeHttpUrl, sanitizeImageUrlList } from "./lib/security.js";
 import bazodealLogo from "./assets/bazodeal.png";
 
 // ── Constants ────────────────────────────────────────────────
@@ -104,9 +105,10 @@ const dealGallery = (deal) => {
       raw = [];
     }
   }
-  const fromJson = Array.isArray(raw) ? raw.filter((u) => typeof u === "string" && u.trim()) : [];
-  if (fromJson.length) return [...new Set(fromJson)];
-  if (deal.image_url) return [deal.image_url];
+  const fromJson = Array.isArray(raw) ? sanitizeImageUrlList(raw, MAX_DEAL_IMAGES) : [];
+  if (fromJson.length) return fromJson;
+  const single = sanitizeHttpUrl(deal.image_url);
+  if (single) return [single];
   return [];
 };
 
@@ -1461,9 +1463,24 @@ export default function Bazodeal() {
     return urls;
   };
 
+  const sanitizeDealInsertPayload = (payload) => {
+    const category = CATEGORIES.includes(payload.category) ? payload.category : INTERESTS[0];
+    const image_urls = sanitizeImageUrlList(payload.image_urls, MAX_DEAL_IMAGES);
+    return {
+      ...payload,
+      title: clipText(payload.title, 200),
+      merchant_name: clipText(payload.merchant_name, 120),
+      category,
+      emoji: clipText(payload.emoji, 8) || "🛍️",
+      description: clipText(payload.description, 8000),
+      image_url: sanitizeHttpUrl(payload.image_url) || image_urls[0] || null,
+      image_urls: image_urls.length ? image_urls : null,
+    };
+  };
+
   /** Insert one deal row; retries with fewer image columns when the schema is older. */
   const persistDealInsert = async (payload) => {
-    let attempt = { ...payload };
+    let attempt = sanitizeDealInsertPayload(payload);
     let error;
     let strippedImage = false;
     for (let pass = 0; pass < 3; pass += 1) {
@@ -1735,14 +1752,14 @@ export default function Bazodeal() {
     const startsIso = new Date(starts_at).toISOString();
     const endsIso = ends_at ? new Date(ends_at).toISOString() : null;
     const { error } = await supabase.from("events").insert({
-      title: title.trim(),
-      description: description?.trim() || null,
-      venue: venue?.trim() || null,
+      title: clipText(title, 200),
+      description: clipText(description, 8000) || null,
+      venue: clipText(venue, 200) || null,
       starts_at: startsIso,
       ends_at: endsIso,
-      image_url: finalImageUrl,
+      image_url: sanitizeHttpUrl(finalImageUrl),
       organizer_id: currentUser.id,
-      organizer_name: profile?.name || "Host",
+      organizer_name: clipText(profile?.name || "Host", 120),
       approved: true,
     });
     setPosting(false);
@@ -2695,8 +2712,8 @@ export default function Bazodeal() {
           {sourcerCandidates.length > 0 && (
             <>
               <p style={{ fontSize:12, color:"var(--text3)", marginBottom:10 }}>
-                Showing {sourcerCandidates.length} candidate line(s){sourcerSourceUrl ? <> from&nbsp;
-                  <a href={sourcerSourceUrl} target="_blank" rel="noopener noreferrer" style={{ color:"var(--gold)" }}>{sourcerSourceUrl}</a></> : null}.
+                Showing {sourcerCandidates.length} candidate line(s){sanitizeHttpUrl(sourcerSourceUrl) ? <> from&nbsp;
+                  <a href={sanitizeHttpUrl(sourcerSourceUrl)} target="_blank" rel="noopener noreferrer" style={{ color:"var(--gold)" }}>{sourcerSourceUrl}</a></> : null}.
               </p>
               <div style={{ marginBottom:16 }}>
                 {sourcerCandidates.map((c) => {
@@ -2724,9 +2741,9 @@ export default function Bazodeal() {
                           {c.snippet && c.snippet !== c.title && (
                             <div className="sourcer-card-sn">{c.snippet}</div>
                           )}
-                          {c.linkUrl ? (
+                          {sanitizeHttpUrl(c.linkUrl) ? (
                             <div className="sourcer-card-link">
-                              <a href={c.linkUrl} target="_blank" rel="noopener noreferrer">Open linked URL</a>
+                              <a href={sanitizeHttpUrl(c.linkUrl)} target="_blank" rel="noopener noreferrer">Open linked URL</a>
                             </div>
                           ) : null}
                         </div>

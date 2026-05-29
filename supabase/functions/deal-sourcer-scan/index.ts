@@ -3,11 +3,7 @@
 // Deploy: supabase functions deploy deal-sourcer-scan
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 const KEYWORD_RE =
   /\b(deal|deals|discount|discounted|offer|offers|sale|on sale|save|promo|promotion|clearance|special|%\s*off|percent\s+off|price drop)\b/i;
@@ -317,13 +313,14 @@ function assertSafeUrl(raw: string): URL {
 }
 
 Deno.serve(async (req) => {
+  const cors = corsHeaders(req);
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { headers: cors });
   }
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -331,7 +328,7 @@ Deno.serve(async (req) => {
   if (!authHeader?.startsWith("Bearer ")) {
     return new Response(JSON.stringify({ error: "Missing Authorization header." }), {
       status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -348,7 +345,7 @@ Deno.serve(async (req) => {
   if (userErr || !user) {
     return new Response(JSON.stringify({ error: "Invalid or expired session." }), {
       status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -358,7 +355,7 @@ Deno.serve(async (req) => {
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body." }), {
       status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -366,7 +363,7 @@ Deno.serve(async (req) => {
   if (!raw) {
     return new Response(JSON.stringify({ error: "url is required." }), {
       status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -377,7 +374,7 @@ Deno.serve(async (req) => {
     const msg = e instanceof Error ? e.message : String(e);
     return new Response(JSON.stringify({ error: msg }), {
       status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -400,14 +397,14 @@ Deno.serve(async (req) => {
         JSON.stringify({
           error: `Could not load page (HTTP ${res.status}). Use a public page URL.`,
         }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
       );
     }
     const ct = res.headers.get("content-type") || "";
     if (!ct.includes("text/html") && !ct.includes("application/xhtml") && !ct.includes("text/plain")) {
       return new Response(
         JSON.stringify({ error: "That URL did not return a readable web page." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
       );
     }
     html = (await res.text()).slice(0, MAX_CHARS);
@@ -416,7 +413,7 @@ Deno.serve(async (req) => {
       e instanceof Error ? (e.name === "AbortError" ? "Request timed out." : e.message) : String(e);
     return new Response(JSON.stringify({ error: `Could not fetch URL: ${msg}` }), {
       status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -431,6 +428,6 @@ Deno.serve(async (req) => {
 
   return new Response(JSON.stringify({ candidates, sourceUrl: target.href, warning }), {
     status: 200,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...cors, "Content-Type": "application/json" },
   });
 });

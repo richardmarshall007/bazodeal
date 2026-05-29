@@ -4,11 +4,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { getServiceRoleKey } from "../_shared/serviceRoleKey.ts";
-
-const cors: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 function randomCode(): string {
   const bytes = new Uint8Array(5);
@@ -22,6 +18,7 @@ function waMeNumber(from: string): string {
 }
 
 Deno.serve(async (req) => {
+  const cors = corsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: cors });
   }
