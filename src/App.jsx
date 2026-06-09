@@ -2,6 +2,7 @@
 // npm install @supabase/supabase-js
 
 import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from "react";
+import { Analytics } from "@vercel/analytics/react";
 import { supabase } from "./lib/supabaseClient";
 import { clipText, sanitizeHttpUrl, sanitizeImageUrlList } from "./lib/security.js";
 import bazodealLogo from "./assets/bazodeal.png";
@@ -3684,6 +3685,9 @@ export default function Bazodeal() {
 
       {/* TOAST */}
       {notif && <div className={`notif ${notif.type}`}>{notif.msg}</div>}
+      
+      {/* VERCEL WEB ANALYTICS */}
+      <Analytics />
     </div>
   );
 }
