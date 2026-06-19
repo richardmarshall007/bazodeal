@@ -2,6 +2,7 @@
 // npm install @supabase/supabase-js
 
 import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from "react";
+import { Analytics } from "@vercel/analytics/react";
 import { supabase } from "./lib/supabaseClient";
 import { clipText, sanitizeHttpUrl, sanitizeImageUrlList } from "./lib/security.js";
 import bazodealLogo from "./assets/bazodeal.png";
@@ -90,6 +91,14 @@ const discountPctFromRetailSale = (retailStr, saleStr) => {
   const pct = (1 - sale / retail) * 100;
   if (pct <= 0 || pct >= 100) return null;
   return Math.round(pct * 100) / 100;
+};
+
+/** Deal (sale) price from stored retail + discount % — for edit form. */
+const salePriceFromDeal = (deal) => {
+  const retail = parseFloat(String(deal?.retail_price ?? ""));
+  const pct = parseFloat(String(deal?.discount_pct ?? ""));
+  if (!Number.isFinite(retail) || retail <= 0 || !Number.isFinite(pct) || pct <= 0 || pct >= 100) return "";
+  return (retail * (1 - pct / 100)).toFixed(2);
 };
 
 /** All image URLs in gallery order (first = listing / hero cover). */
@@ -458,6 +467,8 @@ html[data-theme="light"] .deal-img-logo-mark{filter:drop-shadow(0 1px 2px rgba(0
 
 .overlay{position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto}
 .modal{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--radius-xl);width:100%;max-width:460px;padding:32px;box-shadow:0 24px 60px rgba(0,0,0,.7);animation:up .22s ease;margin:auto}
+.modal-deal-edit{max-width:640px;padding:24px 28px;max-height:min(92vh,900px);overflow-y:auto}
+.deal-form-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
 @keyframes up{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 .modal-title{font-family:'Bebas Neue';font-size:34px;letter-spacing:2px;margin-bottom:6px}
 .modal-sub{color:var(--text2);font-size:13px;margin-bottom:22px;line-height:1.5}
@@ -655,11 +666,14 @@ html[data-theme="light"] .notif.info{background:rgba(255,208,0,.1)}
 
 // ── DealForm — outside main component to prevent cursor-jump remounts ────────
 function DealForm({
-  dealF, setDealF, imagePreviews, onImagesChange, onRemoveImage, posting, onPost, title, btnLabel, btnClass,
+  dealF, setDealF, imagePreviews, existingImageUrls, onImagesChange, onRemoveImage, onRemoveExistingImage,
+  posting, onPost, onCancel, title, btnLabel, btnClass, postingLabel = "Uploading…",
 }) {
   const previewPct = discountPctFromRetailSale(dealF.retailPrice, dealF.salePrice);
   const showPreview = previewPct != null;
-  const hasImages = imagePreviews.length > 0;
+  const keptUrls = existingImageUrls || [];
+  const hasImages = keptUrls.length > 0 || imagePreviews.length > 0;
+  const totalImages = keptUrls.length + imagePreviews.length;
 
   return (
     <div className="deal-form">
@@ -687,13 +701,21 @@ function DealForm({
         ) : (
           <div>
             <div className="deal-img-strip">
-              {imagePreviews.map((src, i) => (
-                <div key={`${src}-${i}`} className="deal-img-thumb">
-                  <img src={src} alt={`Preview ${i + 1}`} />
-                  <button type="button" className="deal-img-thumb-rm" onClick={() => onRemoveImage(i)} aria-label={`Remove image ${i + 1}`}>×</button>
+              {keptUrls.map((src, i) => (
+                <div key={`kept-${src}-${i}`} className="deal-img-thumb">
+                  <img src={src} alt={`Saved image ${i + 1}`} />
+                  {onRemoveExistingImage ? (
+                    <button type="button" className="deal-img-thumb-rm" onClick={() => onRemoveExistingImage(i)} aria-label={`Remove saved image ${i + 1}`}>×</button>
+                  ) : null}
                 </div>
               ))}
-              {imagePreviews.length < MAX_DEAL_IMAGES && (
+              {imagePreviews.map((src, i) => (
+                <div key={`new-${src}-${i}`} className="deal-img-thumb">
+                  <img src={src} alt={`New image ${i + 1}`} />
+                  <button type="button" className="deal-img-thumb-rm" onClick={() => onRemoveImage(i)} aria-label={`Remove new image ${i + 1}`}>×</button>
+                </div>
+              ))}
+              {totalImages < MAX_DEAL_IMAGES && (
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
@@ -787,9 +809,16 @@ function DealForm({
           onChange={e => setDealF(p => ({ ...p, description: e.target.value }))} />
       </div>
 
-      <button className={`btn ${btnClass} btn-lg`} disabled={posting} onClick={onPost}>
-        {posting ? <><span className="spin">⏳</span> Uploading…</> : btnLabel}
-      </button>
+      <div className="deal-form-actions">
+        {onCancel ? (
+          <button type="button" className="btn btn-ghost btn-lg" disabled={posting} onClick={onCancel}>
+            Cancel
+          </button>
+        ) : null}
+        <button type="button" className={`btn ${btnClass} btn-lg`} disabled={posting} onClick={onPost}>
+          {posting ? <><span className="spin">⏳</span> {postingLabel}</> : btnLabel}
+        </button>
+      </div>
     </div>
   );
 }
@@ -837,6 +866,11 @@ export default function Bazodeal() {
   });
   const [imageDraftFiles, setImageDraftFiles] = useState([]);
   const [imageDraftPreviews, setImageDraftPreviews] = useState([]);
+  const [editingDealId, setEditingDealId] = useState(null);
+  const [editDealF, setEditDealF] = useState({ title:"", category:"Electronics", retailPrice:"", salePrice:"", emoji:"🛍️", description:"", stock:"", expires:"" });
+  const [editImageDraftFiles, setEditImageDraftFiles] = useState([]);
+  const [editImageDraftPreviews, setEditImageDraftPreviews] = useState([]);
+  const [editExistingImageUrls, setEditExistingImageUrls] = useState([]);
   const [dealDetail, setDealDetail] = useState(null);
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroCarouselPaused, setHeroCarouselPaused] = useState(false);
@@ -889,6 +923,76 @@ export default function Bazodeal() {
     imageDraftPreviews.forEach((u) => { try { URL.revokeObjectURL(u); } catch { /* noop */ } });
     setImageDraftFiles([]);
     setImageDraftPreviews([]);
+  };
+
+  const cancelDealEdit = () => {
+    setEditingDealId(null);
+    setEditExistingImageUrls([]);
+    setEditDealF({ title:"", category:"Electronics", retailPrice:"", salePrice:"", emoji:"🛍️", description:"", stock:"", expires:"" });
+    editImageDraftPreviews.forEach((u) => { try { URL.revokeObjectURL(u); } catch { /* noop */ } });
+    setEditImageDraftFiles([]);
+    setEditImageDraftPreviews([]);
+  };
+
+  const canEditDeal = useCallback((deal) => {
+    if (!deal || !currentUser) return false;
+    if (profile?.role === "admin") return true;
+    return deal.merchant_id === currentUser.id;
+  }, [currentUser, profile]);
+
+  const openDealEditor = (deal) => {
+    if (!canEditDeal(deal)) {
+      pop("You can't edit this deal.", "error");
+      return;
+    }
+    editImageDraftPreviews.forEach((u) => { try { URL.revokeObjectURL(u); } catch { /* noop */ } });
+    setEditImageDraftFiles([]);
+    setEditImageDraftPreviews([]);
+    setEditingDealId(deal.id);
+    setEditExistingImageUrls(dealGallery(deal));
+    setEditDealF({
+      title: deal.title || "",
+      category: CATEGORIES.includes(deal.category) || INTERESTS.includes(deal.category) ? deal.category : INTERESTS[0],
+      retailPrice: deal.retail_price != null ? String(deal.retail_price) : "",
+      salePrice: salePriceFromDeal(deal),
+      emoji: deal.emoji || "🛍️",
+      description: deal.description || "",
+      stock: deal.stock != null ? String(deal.stock) : "",
+      expires: deal.expires_at ? String(deal.expires_at).slice(0, 10) : "",
+    });
+  };
+
+  const removeExistingImageAt = (index) => {
+    setEditExistingImageUrls((urls) => urls.filter((_, i) => i !== index));
+  };
+
+  const handleEditDealImagesChange = (e) => {
+    const incoming = [...(e.target.files || [])];
+    e.target.value = "";
+    if (incoming.length === 0) return;
+    const nextFiles = [...editImageDraftFiles];
+    for (const file of incoming) {
+      if (editExistingImageUrls.length + nextFiles.length >= MAX_DEAL_IMAGES) {
+        pop(`You can attach at most ${MAX_DEAL_IMAGES} images.`, "error");
+        break;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        pop(`${file.name || "A file"} is over 5MB — skipped.`, "error");
+        continue;
+      }
+      nextFiles.push(file);
+    }
+    if (nextFiles.length === editImageDraftFiles.length) return;
+    editImageDraftPreviews.forEach((u) => { try { URL.revokeObjectURL(u); } catch { /* noop */ } });
+    setEditImageDraftFiles(nextFiles);
+    setEditImageDraftPreviews(nextFiles.map((f) => URL.createObjectURL(f)));
+  };
+
+  const removeEditDealImageAt = (index) => {
+    const u = editImageDraftPreviews[index];
+    if (u) try { URL.revokeObjectURL(u); } catch { /* noop */ }
+    setEditImageDraftFiles((f) => f.filter((_, i) => i !== index));
+    setEditImageDraftPreviews((p) => p.filter((_, i) => i !== index));
   };
 
   // ── Data Fetchers ────────────────────────────────────────
@@ -1503,6 +1607,48 @@ export default function Bazodeal() {
     return { error, strippedImage };
   };
 
+  const sanitizeDealUpdatePayload = (payload) => {
+    const category = CATEGORIES.includes(payload.category) ? payload.category : INTERESTS[0];
+    const image_urls = sanitizeImageUrlList(payload.image_urls, MAX_DEAL_IMAGES);
+    return {
+      title: clipText(payload.title, 200),
+      category,
+      emoji: clipText(payload.emoji, 8) || "🛍️",
+      description: clipText(payload.description, 8000),
+      retail_price: payload.retail_price,
+      discount_pct: payload.discount_pct,
+      stock: payload.stock,
+      expires_at: payload.expires_at,
+      image_url: sanitizeHttpUrl(payload.image_url) || image_urls[0] || null,
+      image_urls: image_urls.length ? image_urls : null,
+    };
+  };
+
+  /** Update one deal row; retries with fewer image columns when the schema is older. */
+  const persistDealUpdate = async (dealId, payload) => {
+    let attempt = sanitizeDealUpdatePayload(payload);
+    let error;
+    let strippedImage = false;
+    for (let pass = 0; pass < 3; pass += 1) {
+      const res = await supabase.from("deals").update(attempt).eq("id", dealId);
+      error = res.error ?? null;
+      if (!error) return { error: null, strippedImage };
+      const msg = (error.message || "").toLowerCase();
+      if (pass === 0 && msg.includes("image_urls")) {
+        delete attempt.image_urls;
+        strippedImage = true;
+        continue;
+      }
+      if (pass === 1 && msg.includes("image_url")) {
+        delete attempt.image_url;
+        strippedImage = true;
+        continue;
+      }
+      break;
+    }
+    return { error, strippedImage };
+  };
+
   // ── Auth ─────────────────────────────────────────────────
   const doLogin = async () => {
     setFormErr(""); setPosting(true);
@@ -1710,6 +1856,65 @@ export default function Bazodeal() {
     await fetchDeals();
     resetDealForm();
     pop(canPostDeals ? "Deal is live! ✅" : "Deal submitted! It will go public once an admin enables posting for your account.");
+  };
+
+  const saveDealEdit = async () => {
+    if (!editingDealId || !currentUser) return;
+    const deal = deals.find((d) => d.id === editingDealId);
+    if (!deal || !canEditDeal(deal)) {
+      pop("You can't edit this deal.", "error");
+      return;
+    }
+
+    const { title, retailPrice, salePrice, description, stock, expires, emoji, category } = editDealF;
+    const computedPct = discountPctFromRetailSale(retailPrice, salePrice);
+    if (!title || !retailPrice || !salePrice) {
+      pop("Title, retail price, and deal price are required.", "error");
+      return;
+    }
+    if (computedPct == null) {
+      pop("Deal price must be greater than zero and less than the retail price.", "error");
+      return;
+    }
+
+    setPosting(true);
+    const imageWasSelected = editImageDraftFiles.length > 0;
+    const uploadedUrls = imageWasSelected ? await uploadDealImagesToStorage(editImageDraftFiles) : [];
+    if (imageWasSelected && uploadedUrls.length !== editImageDraftFiles.length) {
+      setPosting(false);
+      pop("Image upload failed, so changes were not saved.", "error");
+      return;
+    }
+    const mergedUrls = sanitizeImageUrlList([...editExistingImageUrls, ...uploadedUrls], MAX_DEAL_IMAGES);
+    const payload = {
+      title,
+      category,
+      emoji,
+      retail_price: parseFloat(retailPrice),
+      discount_pct: computedPct,
+      description,
+      stock: parseInt(stock, 10) || 0,
+      expires_at: expires || null,
+      image_url: mergedUrls[0] || null,
+      image_urls: mergedUrls.length ? mergedUrls : null,
+    };
+
+    const { error, strippedImage } = await persistDealUpdate(editingDealId, payload);
+    setPosting(false);
+    if (error) {
+      pop("Could not save changes: " + error.message, "error");
+      return;
+    }
+    if (strippedImage) {
+      pop("Deal saved without images. Add image_url and image_urls columns in Supabase (see bazodeal_schema.sql).", "error");
+    }
+    await fetchDeals();
+    if (dealDetail?.id === editingDealId) {
+      const { data } = await supabase.from("deals").select("*").eq("id", editingDealId).maybeSingle();
+      if (data) setDealDetail(data);
+    }
+    cancelDealEdit();
+    pop("Deal updated ✅");
   };
 
   const resetEventForm = () => {
@@ -3312,6 +3517,11 @@ export default function Bazodeal() {
                 <span className={`badge ${d.approved ? (isDealActive(d) ? "badge-live" : "badge-pend") : "badge-pend"}`}>
                   {dealStatusLabel(d)}
                 </span>
+                <div className="admin-actions">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDealEditor(d)}>
+                    Edit
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -3438,6 +3648,9 @@ export default function Bazodeal() {
                   </div>
                   <span className="badge badge-pend">Pending</span>
                   <div className="admin-actions">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDealEditor(d)}>
+                      Edit
+                    </button>
                     <button
                       type="button"
                       className="btn btn-pri btn-sm"
@@ -3477,6 +3690,9 @@ export default function Bazodeal() {
                 </div>
                 <span className={`badge ${isDealActive(d) ? "badge-live" : "badge-pend"}`}>{isDealActive(d) ? "Live" : "Expired"}</span>
                 <div className="admin-actions">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDealEditor(d)}>
+                    Edit
+                  </button>
                   <button className="btn btn-red btn-sm" disabled={adminActionId === d.id} onClick={() => removeDeal(d.id)}>
                     {adminActionId === d.id ? "Working…" : "Remove"}
                   </button>
@@ -3498,6 +3714,9 @@ export default function Bazodeal() {
                 </div>
                 <span className="badge badge-pend">Expired</span>
                 <div className="admin-actions">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDealEditor(d)}>
+                    Edit
+                  </button>
                   <button className="btn btn-red btn-sm" disabled={adminActionId === d.id} onClick={() => removeDeal(d.id)}>
                     {adminActionId === d.id ? "Working…" : "Remove"}
                   </button>
@@ -3667,6 +3886,18 @@ export default function Bazodeal() {
               </div>
             </div>
             <div className="deal-detail-actions">
+              {canEditDeal(dealDetail) ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    openDealEditor(dealDetail);
+                    setDealDetail(null);
+                  }}
+                >
+                  Edit deal
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={`like-btn ${liked.has(dealDetail.id) ? "liked" : ""}`}
@@ -3684,6 +3915,35 @@ export default function Bazodeal() {
 
       {/* TOAST */}
       {notif && <div className={`notif ${notif.type}`}>{notif.msg}</div>}
+
+      {editingDealId ? (
+        <div className="overlay" onClick={(e) => e.target === e.currentTarget && !posting && cancelDealEdit()}>
+          <div className="modal modal-deal-edit" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="deal-edit-title">
+            <div className="modal-title" id="deal-edit-title">Edit deal</div>
+            <div className="modal-sub" style={{ marginBottom: 16 }}>
+              Update price, description, expiry, stock, or images. Pending deals stay private until an admin approves posting.
+            </div>
+            <DealForm
+              dealF={editDealF}
+              setDealF={setEditDealF}
+              imagePreviews={editImageDraftPreviews}
+              existingImageUrls={editExistingImageUrls}
+              onImagesChange={handleEditDealImagesChange}
+              onRemoveImage={removeEditDealImageAt}
+              onRemoveExistingImage={removeExistingImageAt}
+              posting={posting}
+              onPost={saveDealEdit}
+              onCancel={cancelDealEdit}
+              title="Deal details"
+              btnLabel="Save changes ✅"
+              btnClass="btn-pri"
+              postingLabel="Saving…"
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <Analytics route={view} path={view === "home" ? "/" : `/${view}`} />
     </div>
   );
 }
